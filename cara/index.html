@@ -112,18 +112,15 @@ const octx = ov.getContext("2d");
 const statusEl = document.getElementById("status");
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-// ---------- WebGL: la imagen se pinta deformada en un shader ----------
-const MAX_DRAG = 24, MAX_BULGE = 8;
+// ---------- WebGL: dos pasadas ----------
+// 1) Copia limpia de la cara, en coordenadas de la propia cara: cada fotograma se actualiza
+//    salvo donde la tapa la mano, que conserva lo último bueno. Así al estirar se ve piel, no dedos.
+// 2) Pantalla: la cara se deforma leyendo esa copia; el fondo queda quieto y la mano va encima sin deformar.
+const MAX_DRAG = 24, MAX_BULGE = 8, EXT = 1.15, CACHE = 512, FMASK = 256, HAND_SCALE = 0.5;
 const gl = glc.getContext("webgl", { preserveDrawingBuffer: true, antialias: false });
-const VS = `attribute vec2 a; uniform vec2 uRes; varying vec2 vPos;
-void main(){ vPos = vec2((a.x + 1.0) * 0.5 * uRes.x, (1.0 - a.y) * 0.5 * uRes.y); gl_Position = vec4(a, 0.0, 1.0); }`;
-// Para cada píxel de pantalla calculamos de qué punto de la imagen original viene (deformación inversa)
-const FS = `precision highp float;
-uniform sampler2D uTex; uniform vec4 uMap; uniform float uMirror; uniform float uHasTex;
-uniform sampler2D uMask; uniform float uIso; uniform vec2 uRes;
-uniform int uND; uniform vec4 uDrag[${MAX_DRAG}]; uniform float uDragR[${MAX_DRAG}];
-uniform int uNB; uniform vec4 uBulge[${MAX_BULGE}];
-varying vec2 vPos;
+const COMMON = `precision highp float;
+uniform sampler2D uTex; uniform vec4 uMap; uniform float uMirror; uniform float uHasTex; uniform vec2 uRes;
+uniform vec2 uC; uniform vec2 uUx; uniform vec2 uUy; uniform float uS;
 const vec3 BG = vec3(0.043, 0.039, 0.063);
 vec3 pick(vec2 p) {
   vec2 uv = (p - uMap.xy) / uMap.zw;
@@ -131,7 +128,27 @@ vec3 pick(vec2 p) {
   if (uHasTex < 0.5 || uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return BG;
   return texture2D(uTex, uv).rgb;
 }
+vec2 toLocal(vec2 p) { vec2 q = p - uC; return vec2(dot(q, uUx), dot(q, uUy)) / uS; }
+vec2 toWorld(vec2 l) { return uC + (uUx * l.x + uUy * l.y) * uS; }
+float inside(vec2 t) { return step(0.0, t.x) * step(0.0, t.y) * step(t.x, 1.0) * step(t.y, 1.0); }
+`;
+const VS_CACHE = `attribute vec2 a; varying vec2 vL; void main(){ vL = a * ${EXT.toFixed(3)}; gl_Position = vec4(a, 0.0, 1.0); }`;
+const FS_CACHE = COMMON + `uniform sampler2D uHand; varying vec2 vL;
 void main(){
+  vec2 sp = toWorld(vL);
+  float h = texture2D(uHand, clamp(sp / uRes, 0.0, 1.0)).r;
+  float ok = (1.0 - smoothstep(0.02, 0.35, h)) * inside(sp / uRes) * uHasTex;
+  gl_FragColor = vec4(pick(sp), ok);
+}`;
+const VS = `attribute vec2 a; uniform vec2 uRes; varying vec2 vPos;
+void main(){ vPos = vec2((a.x + 1.0) * 0.5 * uRes.x, (1.0 - a.y) * 0.5 * uRes.y); gl_Position = vec4(a, 0.0, 1.0); }`;
+const FS = COMMON + `uniform sampler2D uCache; uniform sampler2D uFMask; uniform sampler2D uHand;
+uniform float uIso; uniform float uHasFace;
+uniform int uND; uniform vec4 uDrag[${MAX_DRAG}]; uniform float uDragR[${MAX_DRAG}];
+uniform int uNB; uniform vec4 uBulge[${MAX_BULGE}];
+varying vec2 vPos;
+void main(){
+  // de qué punto viene cada píxel (deformación inversa)
   vec2 p = vPos;
   for (int i = ${MAX_DRAG - 1}; i >= 0; i--) {
     if (i >= uND) continue;
@@ -144,25 +161,38 @@ void main(){
     vec4 b = uBulge[i]; vec2 q = p - b.xy; float w = exp(-dot(q, q) / (b.z * b.z));
     p = b.xy + q * (1.0 - b.w * w);
   }
-  // Sólo la cara: la máscara se lee en el punto de origen, así viaja con la piel estirada;
-  // fuera de ella se ve la imagen sin tocar
-  float m = uIso > 0.5 ? texture2D(uMask, clamp(p / uRes, 0.0, 1.0)).r : 1.0;
-  gl_FragColor = vec4(mix(pick(vPos), pick(p), m), 1.0);
+  vec3 live = pick(vPos);
+  vec3 col = live;
+  if (uHasFace > 0.5) {
+    vec2 tc = toLocal(p) / (2.0 * ${EXT.toFixed(3)}) + 0.5;
+    float m = texture2D(uFMask, clamp(tc, 0.0, 1.0)).r * inside(tc);
+    vec3 faceCol = texture2D(uCache, clamp(tc, 0.0, 1.0)).rgb;
+    vec3 back = uIso > 0.5 ? live : pick(p);
+    col = mix(back, faceCol, m);
+  }
+  // la mano, siempre delante y tal cual
+  float h = texture2D(uHand, clamp(vPos / uRes, 0.0, 1.0)).r;
+  gl_FragColor = vec4(mix(col, live, h), 1.0);
 }`;
-function shader(type, src) {
-  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
-  return s;
+function shader(type, s) {
+  const sh = gl.createShader(type); gl.shaderSource(sh, s); gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+  return sh;
 }
-const prog = gl.createProgram();
-gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS));
-gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
-gl.linkProgram(prog); gl.useProgram(prog);
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, shader(gl.VERTEX_SHADER, vs)); gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, "a"); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const locs = {};
+  return { p, u: n => (n in locs ? locs[n] : (locs[n] = gl.getUniformLocation(p, n))) };
+}
+const cacheProg = program(VS_CACHE, FS_CACHE), mainProg = program(VS, FS);
 const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-const aLoc = gl.getAttribLocation(prog, "a"); gl.enableVertexAttribArray(aLoc); gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
-const U = n => gl.getUniformLocation(prog, n);
-const u = { res: U("uRes"), map: U("uMap"), mirror: U("uMirror"), hasTex: U("uHasTex"), nd: U("uND"), drag: U("uDrag"), dragR: U("uDragR"), nb: U("uNB"), bulge: U("uBulge"), mask: U("uMask"), iso: U("uIso") };
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+// unidades: 0 vídeo, 1 máscara de manos, 2 máscara de la cara, 3 copia limpia
 function makeTex(unit) {
   const t = gl.createTexture();
   gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
@@ -172,13 +202,18 @@ function makeTex(unit) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   return t;
 }
-const tex = makeTex(0), maskTex = makeTex(1);
-gl.uniform1i(U("uTex"), 0); gl.uniform1i(u.mask, 1);
+const tex = makeTex(0), handTex = makeTex(1), fmaskTex = makeTex(2), cacheTex = makeTex(3);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, CACHE, CACHE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+const fbo = gl.createFramebuffer();
+gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cacheTex, 0);
+gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 function upload(t, unit, img) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img); }
 
-// Máscara de la cara: el óvalo de MediaPipe, algo ampliado y con el borde difuminado, a media resolución
-const maskCv = document.createElement("canvas"), mctx = maskCv.getContext("2d");
-const MASK_SCALE = 0.5;
+// Máscaras dibujadas en 2D: la de la cara en coordenadas de la cara, la de las manos en pantalla
+const fmaskCv = document.createElement("canvas"); fmaskCv.width = fmaskCv.height = FMASK;
+const fctx = fmaskCv.getContext("2d");
+const handCv = document.createElement("canvas"), hctx = handCv.getContext("2d");
 const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
 let isolate = true;
 
@@ -189,7 +224,7 @@ function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = innerWidth; H = innerHeight;
   for (const c of [glc, ov]) { c.width = W * DPR; c.height = H * DPR; }
-  maskCv.width = Math.max(1, Math.round(W * MASK_SCALE)); maskCv.height = Math.max(1, Math.round(H * MASK_SCALE));
+  handCv.width = Math.max(1, Math.round(W * HAND_SCALE)); handCv.height = Math.max(1, Math.round(H * HAND_SCALE));
   octx.setTransform(DPR, 0, 0, DPR, 0, 0);
   gl.viewport(0, 0, glc.width, glc.height);
 }
@@ -209,11 +244,20 @@ function faceFrame() {
   if (!faceRaw || !srcW) return null;
   const P = faceRaw.map(toScreen);
   const a = P[234], b = P[454];
-  const c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  const dx = b.x - a.x, dy = b.y - a.y, s = Math.hypot(dx, dy) || 1;
-  const ux = { x: dx / s, y: dy / s }, uy = { x: -ux.y, y: ux.x };
-  return { c, ux, uy, s, P };
+  const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+  const s = Math.hypot(b.x - a.x, b.y - a.y) || 1, ang = Math.atan2(b.y - a.y, b.x - a.x);
+  // suavizado: los puntos de MediaPipe vibran un poco y la deformación temblaría con ellos.
+  // Si el salto es grande (te has movido de verdad) se sigue enseguida
+  const jump = smooth ? Math.hypot(cx - smooth.cx, cy - smooth.cy) / s : 1;
+  const k = smooth ? clamp(0.25 + jump * 3, 0.25, 1) : 1;
+  if (!smooth) smooth = { cx, cy, s, ang };
+  smooth.cx += (cx - smooth.cx) * k; smooth.cy += (cy - smooth.cy) * k;
+  smooth.s += (s - smooth.s) * k;
+  let da = ang - smooth.ang; da = Math.atan2(Math.sin(da), Math.cos(da)); smooth.ang += da * k;
+  const ux = { x: Math.cos(smooth.ang), y: Math.sin(smooth.ang) }, uy = { x: -ux.y, y: ux.x };
+  return { c: { x: smooth.cx, y: smooth.cy }, ux, uy, s: smooth.s, P };
 }
+let smooth = null;
 const toLocal = (f, p) => { const qx = p.x - f.c.x, qy = p.y - f.c.y; return { x: (qx * f.ux.x + qy * f.ux.y) / f.s, y: (qx * f.uy.x + qy * f.uy.y) / f.s }; };
 const toWorld = (f, l) => ({ x: f.c.x + (f.ux.x * l.x + f.uy.x * l.y) * f.s, y: f.c.y + (f.ux.y * l.x + f.uy.y * l.y) * f.s });
 
@@ -278,7 +322,7 @@ async function usePhotoUrl(url) {
   if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
   isPhoto = true; src = img; srcW = img.naturalWidth; srcH = img.naturalHeight;
   upload(tex, 0, img); texReady = true;
-  strokes = []; faceRaw = null;
+  strokes = []; faceRaw = null; smooth = null;
   showApp();
   statusEl.textContent = "Buscando la cara…";
   try {
@@ -390,32 +434,86 @@ function relax(dt) {
   strokes = strokes.filter(s => s.held || Math.hypot(s.B.x - s.A.x, s.B.y - s.A.y) > 0.002 || Math.hypot(s.v.x, s.v.y) > 0.02);
 }
 
-// Óvalo de la cara ampliado (cubre frente y mandíbula) y difuminado con una sombra:
-// se dibuja fuera del lienzo y sólo cae dentro su sombra borrosa, que funciona en todos los navegadores
-function drawMask() {
-  mctx.setTransform(1, 0, 0, 1, 0, 0);
-  mctx.clearRect(0, 0, maskCv.width, maskCv.height);
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
+// Sombra difuminada de una figura: se dibuja fuera del lienzo y sólo cae dentro su sombra (funciona en todos los navegadores)
+function blurredShape(c, w, blur, draw) {
+  const off = w + 200;
+  c.save(); c.translate(-off, 0);
+  c.shadowColor = "#fff"; c.shadowBlur = blur; c.shadowOffsetX = off;
+  c.fillStyle = "#fff"; c.strokeStyle = "#fff";
+  draw(c);
+  c.restore();
+}
+
+// Máscara de la cara en sus propias coordenadas: el óvalo, con frente y mandíbula un poco ampliadas
+function drawFaceMask() {
+  fctx.setTransform(1, 0, 0, 1, 0, 0);
+  fctx.clearRect(0, 0, FMASK, FMASK);
   if (!face) return;
-  const k = MASK_SCALE, off = maskCv.width + 100;
-  mctx.setTransform(k, 0, 0, k, -off, 0);
-  mctx.shadowColor = "#fff"; mctx.shadowBlur = face.s * k * 0.09; mctx.shadowOffsetX = off;
-  mctx.fillStyle = "#fff";
-  mctx.beginPath();
-  FACE_OVAL.forEach((i, n) => {
-    const p = face.P[i], up = toLocal(face, p).y < 0 ? 1.16 : 1.06;
-    const x = face.c.x + (p.x - face.c.x) * up, y = face.c.y + (p.y - face.c.y) * up;
-    n ? mctx.lineTo(x, y) : mctx.moveTo(x, y);
+  const toTex = l => ({ x: (l.x / (2 * EXT) + 0.5) * FMASK, y: (l.y / (2 * EXT) + 0.5) * FMASK });
+  blurredShape(fctx, FMASK, FMASK * 0.03, c => {
+    c.beginPath();
+    FACE_OVAL.forEach((i, n) => {
+      const l = toLocal(face, face.P[i]), k = l.y < 0 ? 1.14 : 1.05;
+      const t = toTex({ x: l.x * k, y: l.y * k });
+      n ? c.lineTo(t.x, t.y) : c.moveTo(t.x, t.y);
+    });
+    c.closePath(); c.fill();
   });
-  mctx.closePath(); mctx.fill();
-  mctx.shadowColor = "transparent";
+}
+
+// Silueta de las manos en pantalla: dedos como trazos gruesos y la palma rellena
+const PALM = [0, 1, 5, 9, 13, 17];
+function drawHandMask() {
+  hctx.setTransform(1, 0, 0, 1, 0, 0);
+  hctx.clearRect(0, 0, handCv.width, handCv.height);
+  for (const p of pointers.values()) {
+    if (!p.landmarks) continue;
+    const L = p.landmarks.map(q => ({ x: q.x * HAND_SCALE, y: q.y * HAND_SCALE }));
+    const size = Math.hypot(L[0].x - L[9].x, L[0].y - L[9].y);
+    blurredShape(hctx, handCv.width, size * 0.12, c => {
+      c.lineCap = "round"; c.lineJoin = "round"; c.lineWidth = size * 0.36;
+      c.beginPath();
+      for (const [a, b] of BONES) { c.moveTo(L[a].x, L[a].y); c.lineTo(L[b].x, L[b].y); }
+      c.stroke();
+      c.beginPath(); PALM.forEach((i, n) => n ? c.lineTo(L[i].x, L[i].y) : c.moveTo(L[i].x, L[i].y)); c.closePath(); c.fill();
+      // la muñeca y el antebrazo que entran por abajo
+      const dx = L[0].x - L[9].x, dy = L[0].y - L[9].y;
+      c.lineWidth = size * 0.75; c.beginPath(); c.moveTo(L[0].x, L[0].y); c.lineTo(L[0].x + dx * 2.5, L[0].y + dy * 2.5); c.stroke();
+    });
+  }
+}
+
+function setCommon(P) {
+  gl.uniform2f(P.u("uRes"), W, H);
+  gl.uniform1f(P.u("uHasTex"), texReady ? 1 : 0);
+  gl.uniform1f(P.u("uMirror"), isPhoto ? 0 : 1);
+  if (srcW) { const m = mapping(); gl.uniform4f(P.u("uMap"), m.ox, m.oy, srcW * m.s, srcH * m.s); }
+  if (face) {
+    gl.uniform2f(P.u("uC"), face.c.x, face.c.y); gl.uniform1f(P.u("uS"), face.s);
+    gl.uniform2f(P.u("uUx"), face.ux.x, face.ux.y); gl.uniform2f(P.u("uUy"), face.uy.x, face.uy.y);
+  }
+  gl.uniform1i(P.u("uTex"), 0); gl.uniform1i(P.u("uHand"), 1);
 }
 
 const dragArr = new Float32Array(MAX_DRAG * 4), dragR = new Float32Array(MAX_DRAG), bulgeArr = new Float32Array(MAX_BULGE * 4);
 function render() {
-  gl.uniform2f(u.res, W, H);
-  gl.uniform1f(u.hasTex, texReady ? 1 : 0);
-  gl.uniform1f(u.mirror, isPhoto ? 0 : 1);
-  if (srcW) { const m = mapping(); gl.uniform4f(u.map, m.ox, m.oy, srcW * m.s, srcH * m.s); }
+  drawHandMask(); upload(handTex, 1, handCv);
+  drawFaceMask(); upload(fmaskTex, 2, fmaskCv);
+
+  // 1) actualizar la copia limpia de la cara (mezcla: donde está la mano, no se toca)
+  if (face && texReady) {
+    gl.useProgram(cacheProg.p); setCommon(cacheProg);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.viewport(0, 0, CACHE, CACHE);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, glc.width, glc.height);
+  }
+
+  // 2) pantalla
+  gl.useProgram(mainProg.p); setCommon(mainProg);
+  gl.uniform1i(mainProg.u("uFMask"), 2); gl.uniform1i(mainProg.u("uCache"), 3);
   let nd = 0, nb = 0;
   if (face) {
     for (const s of strokes) {
@@ -434,23 +532,16 @@ function render() {
       bulgeArr.set([x, y, face.s * b.r, b.k], nb * 4); nb++;
     }
   }
-  gl.uniform1i(u.nd, nd); gl.uniform4fv(u.drag, dragArr); gl.uniform1fv(u.dragR, dragR);
-  gl.uniform1i(u.nb, nb); gl.uniform4fv(u.bulge, bulgeArr);
-  gl.uniform1f(u.iso, isolate ? 1 : 0);
-  if (isolate) { drawMask(); upload(maskTex, 1, maskCv); }
+  gl.uniform1f(mainProg.u("uHasFace"), face ? 1 : 0);
+  gl.uniform1i(mainProg.u("uND"), nd); gl.uniform4fv(mainProg.u("uDrag"), dragArr); gl.uniform1fv(mainProg.u("uDragR"), dragR);
+  gl.uniform1i(mainProg.u("uNB"), nb); gl.uniform4fv(mainProg.u("uBulge"), bulgeArr);
+  gl.uniform1f(mainProg.u("uIso"), isolate ? 1 : 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
 function overlay() {
   octx.clearRect(0, 0, W, H);
   for (const [id, p] of pointers) {
-    if (p.landmarks) {
-      octx.strokeStyle = "rgba(255,158,196,.4)"; octx.lineWidth = 2; octx.lineCap = "round";
-      octx.beginPath();
-      for (const [a, c] of BONES) { octx.moveTo(p.landmarks[a].x, p.landmarks[a].y); octx.lineTo(p.landmarks[c].x, p.landmarks[c].y); }
-      octx.stroke();
-    }
     if (!p.init || (id === "mouse" && !p.pinch)) continue;
     octx.lineWidth = 3;
     octx.strokeStyle = "rgba(244,241,255,.35)";
@@ -481,7 +572,7 @@ function tick(now) {
 }
 
 resize();
-if (location.hostname === "localhost") window.__cara = { usePhotoUrl, tick: () => tick(performance.now()), get strokes() { return strokes; }, get face() { return face; } };
+if (location.hostname === "localhost") window.__cara = { usePhotoUrl, tick: () => tick(performance.now()), pointers, get strokes() { return strokes; }, get face() { return face; } };
 requestAnimationFrame(frame);
 </script>
 </body>
