@@ -107,7 +107,7 @@ function layoutStage() {
   const bw = portrait() ? W * 0.36 : Math.min(260, W * 0.24);
   basket = { x: W - bw - 16, y: floorY - bw * 0.55, w: bw, h: bw * 0.55 };
   shelf.x = portrait() ? 16 : Math.max(24, W * 0.05);
-  shelf.w = portrait() ? W - 32 : Math.min(460, W * 0.42);
+  shelf.w = portrait() ? W * 0.45 : Math.min(300, W * 0.26);
   shelf.y = H * (portrait() ? 0.4 : 0.45);
 }
 
@@ -163,10 +163,11 @@ function spawn() {
   const n = portrait() ? 5 : 7;
   const size = portrait() ? Math.min(W * 0.3, H * 0.17) : Math.min(H * 0.24, 190);
   people = [];
+  const onShelfN = portrait() ? 2 : 3;
   for (let i = 0; i < n; i++) {
-    const onShelf = i < Math.ceil(n / 2);
-    const k = onShelf ? i : i - Math.ceil(n / 2);
-    const slots = onShelf ? Math.ceil(n / 2) : n - Math.ceil(n / 2);
+    const onShelf = i < onShelfN;
+    const k = onShelf ? i : i - onShelfN;
+    const slots = onShelf ? onShelfN : n - onShelfN;
     const x = onShelf
       ? shelf.x + shelf.w * (k + 0.5) / slots
       : 16 + (basket.x - 32) * (k + 0.5) / slots;
@@ -284,12 +285,12 @@ function updatePointers() {
 }
 
 // ---------- Física ----------
-function collideStatic(pt) {
+function collideStatic(pt, carried) {
   const r = pt.r;
   // suelo con rozamiento
   if (pt.y + r > floorY) { pt.y = floorY - r; pt.px = pt.x - (pt.x - pt.px) * 0.55; }
-  // estantería: sólo si llega desde arriba
-  if (pt.x > shelf.x - 10 && pt.x < shelf.x + shelf.w + 10 && pt.y + r > shelf.y && pt.py + r <= shelf.y + 3) {
+  // estantería: sólo si llega desde arriba, y no para quien va cogido (así se puede bajar a través de ella)
+  if (!carried && pt.x > shelf.x - 10 && pt.x < shelf.x + shelf.w + 10 && pt.y + r > shelf.y && pt.py + r <= shelf.y + 3) {
     pt.y = shelf.y - r; pt.px = pt.x - (pt.x - pt.px) * 0.55;
   }
   // bordes de la pantalla
@@ -322,7 +323,8 @@ function step(dt) {
       const P = per.pts;
       STICKS.forEach(([a, b], k) => satisfy(P[a], P[b], per.rest[k], false));
       SOFT.forEach(([a, b], k) => satisfy(P[a], P[b], per.soft[k], true));
-      for (const pt of P) if (!pt.held) collideStatic(pt);
+      const carried = P.some(p => p.held);
+      for (const pt of P) if (!pt.held) collideStatic(pt, carried);
     }
     if (it % 3 === 0) collidePeople();
   }
