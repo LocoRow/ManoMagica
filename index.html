@@ -7,1056 +7,131 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;800&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
-  /* Pantalla completa: cámara al fondo, canvas con la escena encima, HUD de cristal flotante */
+  /* Portada: título y dos tarjetas grandes, una por modo; en el móvil se apilan */
   :root {
     --ink: #f4f1ff;
-    --dim: rgba(244, 241, 255, .65);
-    --glass: rgba(14, 12, 20, .5);
-    --accent: #7cf5c8;
-    --grab: #ffcf4a;
+    --dim: rgba(244, 241, 255, .62);
+    --card: rgba(255, 255, 255, .045);
+    --line: rgba(255, 255, 255, .1);
+    --mint: #7cf5c8;
+    --pink: #ff9ec4;
     --display: "Bricolage Grotesque", system-ui, sans-serif;
     --mono: "JetBrains Mono", ui-monospace, monospace;
     color-scheme: dark;
   }
-  [hidden] { display: none !important; }
-  html, body { height: 100%; margin: 0; background: #0b0a10; color: var(--ink); overflow: hidden; font-family: var(--display); }
-  video, canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
-  canvas { touch-action: none; }
-  video { object-fit: cover; transform: scaleX(-1); filter: saturate(.8) brightness(.78) contrast(1.05); }
-  #hud {
-    position: fixed; top: 16px; left: 16px; right: 16px;
-    display: flex; gap: 10px; align-items: center; flex-wrap: wrap; pointer-events: none;
+  html, body { min-height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(ellipse at 30% 0%, #241d3a 0%, transparent 55%), radial-gradient(ellipse at 90% 100%, #3a1f33 0%, transparent 50%), #0b0a10;
+    color: var(--ink); font-family: var(--display);
+    padding-inline: 16px; padding-block: clamp(32px, 8vh, 80px);
+    display: grid; place-items: center;
   }
-  .pill, .btn {
-    background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,.08); border-radius: 999px;
-    padding: 8px 14px; font: 400 12.5px/1.3 var(--mono); color: var(--dim);
+  main { width: 100%; max-width: 62rem; display: grid; gap: clamp(28px, 5vh, 48px); }
+  header { display: grid; gap: 12px; text-align: center; }
+  .eyebrow { font: 400 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+  h1 { margin: 0; font: 800 clamp(44px, 9vw, 96px)/.9 var(--display); letter-spacing: -.035em; text-wrap: balance; }
+  header p { margin: 0 auto; max-width: 34rem; color: var(--dim); font-size: 17px; line-height: 1.5; }
+  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 18px; }
+  .mode {
+    display: grid; grid-template-rows: auto 1fr; text-decoration: none; color: inherit;
+    background: var(--card); border: 1px solid var(--line); border-radius: 22px; overflow: hidden;
+    transition: transform .25s ease, border-color .25s ease, background .25s ease;
   }
-  .pill b { color: var(--ink); font-weight: 400; }
-  .btn { pointer-events: auto; color: var(--ink); cursor: pointer; justify-self: auto; }
-  .btn:focus-visible { outline: 2px solid var(--grab); outline-offset: 2px; }
-  #title { font: 800 20px/1 var(--display); color: var(--ink); letter-spacing: -.01em; text-shadow: 0 1px 12px rgba(0,0,0,.5); }
-  #intro {
-    position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
-    background: radial-gradient(ellipse at 50% 35%, #26213a 0%, #0b0a10 72%);
-  }
-  #intro .card { max-width: 30rem; text-align: center; display: grid; gap: 18px; }
-  #intro h1 { font: 800 clamp(40px, 8vw, 72px)/.95 var(--display); margin: 0; letter-spacing: -.03em; text-wrap: balance; }
-  #intro p { margin: 0; color: var(--dim); font-size: 17px; line-height: 1.5; }
-  #intro .gest { font: 400 14px/1.6 var(--mono); color: var(--dim); text-align: left; justify-self: center; }
-  #intro .gest b { color: var(--accent); font-weight: 400; }
-  #go {
-    justify-self: center; font: 800 18px/1 var(--display); padding: 16px 28px; border: 0; border-radius: 14px;
-    background: var(--accent); color: #0b0a10; cursor: pointer;
-  }
-  #go:focus-visible { outline: 3px solid var(--grab); outline-offset: 3px; }
-  #err { color: #ff8a8a; font: 400 13px/1.5 var(--mono); }
+  .mode:hover { transform: translateY(-4px); background: rgba(255,255,255,.07); }
+  .mode:focus-visible { outline: 3px solid var(--c); outline-offset: 4px; }
+  .mode.gente { --c: var(--mint); }
+  .mode.cara { --c: var(--pink); }
+  .mode:hover { border-color: var(--c); }
+  .art { aspect-ratio: 16 / 9; max-width: 100%; display: block; background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.25)); }
+  .body { padding: 22px 24px 24px; display: grid; gap: 10px; align-content: start; }
+  .body h2 { margin: 0; font: 800 30px/1 var(--display); letter-spacing: -.02em; }
+  .body p { margin: 0; color: var(--dim); line-height: 1.5; }
+  .meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .tag { font: 400 12px/1 var(--mono); padding: 7px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+  .go { font: 800 16px/1 var(--display); color: var(--c); margin-top: 8px; }
+  footer { text-align: center; font: 400 12.5px/1.6 var(--mono); color: var(--dim); }
+  @media (prefers-reduced-motion: reduce) { .mode, .mode:hover { transition: none; transform: none; } }
 </style>
 </head>
 <body>
-<video id="cam" autoplay playsinline muted></video>
-<canvas id="stage"></canvas>
+<main>
+  <header>
+    <span class="eyebrow">Reconocimiento por cámara</span>
+    <h1>Mano Mágica</h1>
+    <p>Tu cámara ve tus manos y tu cara, y con ellas mueves lo que hay en pantalla. Elige un modo.</p>
+  </header>
 
-<div id="hud" hidden>
-  <span id="title">Mano Mágica</span>
-  <span class="pill" id="status">Cargando modelo…</span>
-  <span class="pill">En la cesta: <b id="count">0</b></span>
-  <button class="btn" id="reset" type="button">Recolocar</button>
-  <button class="btn" id="mute" type="button">Sonido: sí</button>
-</div>
+  <div class="modes">
+    <a class="mode gente" href="gente/">
+      <svg class="art" viewBox="0 0 320 180" role="img" aria-label="Una mano sujeta a una persona por la cabeza; otras pasean por el suelo">
+        <defs><radialGradient id="g1" cx="50%" cy="40%" r="60%"><stop offset="0" stop-color="#7cf5c8" stop-opacity=".18"/><stop offset="1" stop-color="#7cf5c8" stop-opacity="0"/></radialGradient></defs>
+        <rect width="320" height="180" fill="url(#g1)"/>
+        <rect x="0" y="150" width="320" height="30" fill="#000" opacity=".35"/>
+        <line x1="0" y1="150" x2="320" y2="150" stroke="#fff" stroke-opacity=".15"/>
+        <rect x="18" y="86" width="110" height="5" rx="2" fill="#a6773f"/>
+        <rect x="236" y="128" width="66" height="22" rx="3" fill="#b0834b"/>
+        <g stroke-linecap="round" fill="none">
+          <!-- persona colgando -->
+          <circle cx="176" cy="44" r="6" fill="#e8bd9c" stroke="none"/>
+          <path d="M176 50 L178 74" stroke="#8f2f2f" stroke-width="9"/>
+          <path d="M176 54 L168 66 L166 78 M178 54 L186 66 L190 76" stroke="#e8bd9c" stroke-width="3.2"/>
+          <path d="M177 74 L174 92 L172 108 M179 74 L184 92 L188 106" stroke="#2a3a56" stroke-width="4.2"/>
+          <!-- personas en el suelo y la balda -->
+          <g stroke-width="3.6">
+            <path d="M60 124 L60 138 M60 138 L56 150 M60 138 L64 150" stroke="#3b5a85"/>
+            <path d="M60 110 L60 126" stroke="#3d5e49" stroke-width="7"/>
+            <path d="M120 124 L120 138 M120 138 L115 150 M120 138 L125 150" stroke="#1c1c1e"/>
+            <path d="M120 110 L120 126" stroke="#f1f0ec" stroke-width="7"/>
+            <path d="M74 62 L74 74 M74 74 L71 86 M74 74 L77 86" stroke="#54443a"/>
+            <path d="M74 50 L74 63" stroke="#66758e" stroke-width="7"/>
+          </g>
+          <circle cx="60" cy="104" r="5.5" fill="#c08560" stroke="none"/>
+          <circle cx="120" cy="104" r="5.5" fill="#f3d5c0" stroke="none"/>
+          <circle cx="74" cy="44" r="5.5" fill="#9c6440" stroke="none"/>
+        </g>
+        <!-- mano en pinza -->
+        <g fill="none" stroke="#7cf5c8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity=".9">
+          <path d="M214 14 L196 30 L182 38"/><path d="M226 20 L204 36 L184 40"/><path d="M232 30 L212 40"/><path d="M234 40 L216 46"/>
+          <path d="M226 62 L236 40 L232 22 L214 14"/>
+        </g>
+        <circle cx="181" cy="39" r="9" fill="none" stroke="#ffcf4a" stroke-width="2.4"/>
+      </svg>
+      <div class="body">
+        <h2>Coge a la gente</h2>
+        <p>Hay gente paseando por el escenario. Si acercas la mano, huyen. Cógelos de la cabeza, una mano o un pie y el resto del cuerpo cuelga. Mételos en la cesta y lo celebran.</p>
+        <div class="meta"><span class="tag">Física de cuerpos</span><span class="tag">Sonido</span><span class="tag">Ratón sin cámara</span></div>
+        <span class="go">Jugar →</span>
+      </div>
+    </a>
 
-<div id="intro">
-  <div class="card">
-    <h1>Coge a la gente con la mano</h1>
-    <p>La cámara te pone de fondo y delante hay gente paseando. Si acercas la mano, huyen. Cógelos de la cabeza, de una mano o de un pie y el resto del cuerpo cuelga. Suéltalos y se levantan solos.</p>
-    <div class="gest">
-      <b>pinza</b> (pulgar + índice) → agarrar<br>
-      <b>abrir los dedos</b> → soltar<br>
-      <b>soltar en movimiento</b> → lanzar<br>
-      sin cámara también funciona con el ratón
-    </div>
-    <button id="go">Encender cámara</button>
-    <div id="err"></div>
+    <a class="mode cara" href="cara/">
+      <svg class="art" viewBox="0 0 320 180" role="img" aria-label="Una cara estirada hacia un lado por una mano en pinza">
+        <defs><radialGradient id="g2" cx="50%" cy="45%" r="60%"><stop offset="0" stop-color="#ff9ec4" stop-opacity=".2"/><stop offset="1" stop-color="#ff9ec4" stop-opacity="0"/></radialGradient></defs>
+        <rect width="320" height="180" fill="url(#g2)"/>
+        <!-- cara deformada: la mejilla derecha estirada -->
+        <path d="M128 52 C128 24 192 24 192 52 C200 70 236 84 258 92 C236 104 196 112 186 136 C178 160 142 160 134 136 C124 112 122 80 128 52 Z" fill="#d6a07a"/>
+        <path d="M126 58 C126 22 194 22 194 58 C182 40 140 40 126 58 Z" fill="#2e1f15"/>
+        <ellipse cx="146" cy="78" rx="7" ry="4.5" fill="#f4efe9"/><circle cx="146" cy="78" r="3" fill="#2a1a10"/>
+        <ellipse cx="176" cy="78" rx="9" ry="6" fill="#f4efe9"/><circle cx="177" cy="78" r="3.6" fill="#2a1a10"/>
+        <path d="M160 86 Q166 102 156 104" fill="none" stroke="#9c6440" stroke-width="2"/>
+        <path d="M144 120 Q170 132 200 112" fill="none" stroke="#7c3b35" stroke-width="3" stroke-linecap="round"/>
+        <!-- mano en pinza tirando -->
+        <g fill="none" stroke="#ff9ec4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity=".9">
+          <path d="M300 70 L282 82 L264 90"/><path d="M306 84 L286 92 L266 94"/><path d="M308 96 L290 100"/><path d="M304 108 L290 108"/>
+          <path d="M300 128 L312 100 L306 76 L300 70"/>
+        </g>
+        <circle cx="262" cy="92" r="9" fill="none" stroke="#ffcf4a" stroke-width="2.4"/>
+      </svg>
+      <div class="body">
+        <h2>Moldea tu cara</h2>
+        <p>Haz la pinza sobre tu cara y tira: se estira como plastilina y la deformación te sigue aunque te muevas. Con efectos de narizón, ojos saltones o cabezón, y foto para guardarla.</p>
+        <div class="meta"><span class="tag">Cara + manos</span><span class="tag">Modo gelatina</span><span class="tag">Funciona con una foto</span></div>
+        <span class="go">Probar →</span>
+      </div>
+    </a>
   </div>
-</div>
 
-<script type="module">
-import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-
-const video = document.getElementById("cam");
-const cv = document.getElementById("stage");
-const ctx = cv.getContext("2d");
-const statusEl = document.getElementById("status");
-const countEl = document.getElementById("count");
-const rand = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
-const pick = arr => arr[Math.floor(Math.random() * arr.length)];
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-let W = 0, H = 0, DPR = 1;
-let people = [];
-function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, 2);
-  W = innerWidth; H = innerHeight;
-  cv.width = W * DPR; cv.height = H * DPR;
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  layoutStage();
-  // Si se crearon sin tamaño (pestaña oculta al cargar) o el móvil gira, se vuelven a colocar
-  if (W && H && (!people.length || people[0].size < 20 || people.portrait !== portrait())) spawn();
-}
-addEventListener("resize", resize);
-
-// ---------- Sonido (todo sintetizado con Web Audio, sin ficheros) ----------
-let AC = null, master = null, noiseBuf = null, muted = false;
-function audioInit() {
-  if (AC) { if (AC.state === "suspended") AC.resume(); return; }
-  try {
-    AC = new (window.AudioContext || window.webkitAudioContext)();
-    master = AC.createGain(); master.gain.value = 0.8; master.connect(AC.destination);
-    noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
-    const d = noiseBuf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-  } catch { AC = null; }
-}
-const ready = () => AC && !muted;
-function env(g, t, peak, a, dur) {
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(peak, t + a);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-}
-// Golpe seco contra el suelo: ruido grave + un bombo corto
-function thud(v) {
-  if (!ready()) return;
-  const t = AC.currentTime;
-  const n = AC.createBufferSource(); n.buffer = noiseBuf;
-  const f = AC.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 180 + v * 380;
-  const g = AC.createGain(); env(g, t, 0.15 + v * 0.6, 0.004, 0.2);
-  n.connect(f).connect(g).connect(master); n.start(t, rand(0.5), 0.25);
-  const o = AC.createOscillator(); o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.16);
-  const g2 = AC.createGain(); env(g2, t, 0.1 + v * 0.45, 0.004, 0.18);
-  o.connect(g2).connect(master); o.start(t); o.stop(t + 0.22);
-}
-// Voz con formantes: un diente de sierra pasado por dos filtros que imitan la vocal
-const VOWELS = { a: [780, 1250], e: [480, 1850], i: [320, 2300], o: [520, 900], u: [350, 780] };
-function voice(pitch, { vowel = "a", dur = 0.35, from = 1.15, to = 0.85, vib = 0, vol = 0.5, delay = 0 } = {}) {
-  if (!ready()) return;
-  const t = AC.currentTime + delay;
-  const o = AC.createOscillator(); o.type = "sawtooth";
-  o.frequency.setValueAtTime(pitch * from, t);
-  o.frequency.exponentialRampToValueAtTime(pitch * to, t + dur);
-  if (vib) {
-    const l = AC.createOscillator(); l.frequency.value = 6.5;
-    const lg = AC.createGain(); lg.gain.value = pitch * vib;
-    l.connect(lg).connect(o.frequency); l.start(t); l.stop(t + dur);
-  }
-  const g = AC.createGain(); env(g, t, vol, 0.03, dur);
-  const [f1, f2] = VOWELS[vowel], shift = pitch > 200 ? 1.15 : 1;
-  for (const [f, q, a] of [[f1, 5, 1], [f2, 7, 0.55]]) {
-    const b = AC.createBiquadFilter(); b.type = "bandpass"; b.frequency.value = f * shift; b.Q.value = q;
-    const bg = AC.createGain(); bg.gain.value = a;
-    o.connect(b).connect(bg).connect(g);
-  }
-  g.connect(master); o.start(t); o.stop(t + dur + 0.05);
-}
-const SAY = {
-  scream: p => voice(p * 1.35, { vowel: "a", dur: 0.6, from: 1, to: 1.2, vib: 0.035, vol: 0.55 }),
-  ay: p => { voice(p * 1.2, { vowel: "a", dur: 0.14, from: 1.25, to: 1.1 }); voice(p * 1.1, { vowel: "i", dur: 0.2, from: 1.05, to: 0.75, delay: 0.12 }); },
-  whee: p => voice(p * 1.5, { vowel: "i", dur: 0.7, from: 0.85, to: 1.5, vol: 0.45 }),
-  gasp: p => voice(p * 1.3, { vowel: "a", dur: 0.2, from: 1.1, to: 1.35, vol: 0.35 }),
-  yay: p => { voice(p * 1.2, { vowel: "i", dur: 0.18, from: 1, to: 1.2 }); voice(p * 1.3, { vowel: "u", dur: 0.3, from: 1.2, to: 1.5, delay: 0.16 }); },
-};
-function say(per, what) {
-  const now = performance.now();
-  if (now - per.lastVoice < 650) return;
-  per.lastVoice = now;
-  SAY[what](per.pitch);
-}
-// Aplauso: muchas palmadas de ruido filtrado repartidas en el tiempo
-function applause() {
-  if (!ready()) return;
-  for (let k = 0; k < 80; k++) {
-    const t = AC.currentTime + rand(1.8) * (k / 80) + rand(0.05);
-    const n = AC.createBufferSource(); n.buffer = noiseBuf;
-    const f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = rand(1100, 2600); f.Q.value = 1.2;
-    const g = AC.createGain(); env(g, t, 0.12 * (1 - k / 100), 0.002, 0.05);
-    n.connect(f).connect(g).connect(master); n.start(t, rand(0.8), 0.06);
-  }
-}
-
-// ---------- Escenario ----------
-const GRAVITY = 2400, DAMP = 0.992, ITER = 10, SUBSTEPS = 2, K_POSE = 0.22;
-let floorY = 0, basket = { x: 0, y: 0, w: 0, h: 0 }, SUB_DT = 1 / 120;
-const shelf = { x: 0, y: 0, w: 0 };
-const portrait = () => W < H;
-
-function layoutStage() {
-  floorY = H * (portrait() ? 0.9 : 0.87);
-  const bw = portrait() ? W * 0.38 : Math.min(280, W * 0.24);
-  basket = { x: W - bw - 16, y: floorY - bw * 0.32, w: bw, h: bw * 0.32 };
-  shelf.x = portrait() ? 16 : Math.max(24, W * 0.05);
-  shelf.w = portrait() ? W * 0.45 : Math.min(320, W * 0.27);
-  shelf.y = H * (portrait() ? 0.42 : 0.47);
-}
-
-// Dónde apoya alguien que está en x con los pies a la altura y
-function supportAt(x, y) {
-  if (x > shelf.x - 10 && x < shelf.x + shelf.w + 10 && y <= shelf.y + 6) return shelf.y;
-  return floorY;
-}
-
-// ---------- Personas (cuerpo de Verlet: puntos + varillas; "músculos" que tiran hacia una pose) ----------
-// Proporciones humanas: la cabeza es ~1/7.5 de la altura. Pies en 0, cabeza arriba, x a la derecha
-const JOINTS = {
-  head: [0, -0.928], neck: [0, -0.848],
-  shL: [-0.105, -0.818], shR: [0.105, -0.818],
-  elL: [-0.13, -0.64], elR: [0.13, -0.64],
-  haL: [-0.14, -0.47], haR: [0.14, -0.47],
-  hiL: [-0.062, -0.505], hiR: [0.062, -0.505],
-  knL: [-0.062, -0.265], knR: [0.062, -0.265],
-  ftL: [-0.066, 0], ftR: [0.066, 0],
-};
-const NAMES = Object.keys(JOINTS);
-const IDX = Object.fromEntries(NAMES.map((n, i) => [n, i]));
-const STICKS = [
-  ["head", "neck"], ["neck", "shL"], ["neck", "shR"], ["shL", "shR"],
-  ["head", "shL"], ["head", "shR"],
-  ["shL", "elL"], ["elL", "haL"], ["shR", "elR"], ["elR", "haR"],
-  ["shL", "hiL"], ["shR", "hiR"], ["hiL", "hiR"], ["shL", "hiR"], ["shR", "hiL"],
-  ["hiL", "knL"], ["knL", "ftL"], ["hiR", "knR"], ["knR", "ftR"],
-].map(([a, b]) => [IDX[a], IDX[b]]);
-// Varillas que sólo empujan: codos y rodillas no se doblan del todo al revés
-const SOFT = [["shL", "haL", 0.55], ["shR", "haR", 0.55], ["hiL", "ftL", 0.6], ["hiR", "ftR", 0.6], ["neck", "hiL", 0.7], ["neck", "hiR", 0.7]]
-  .map(([a, b, k]) => [IDX[a], IDX[b], k]);
-const GRABBABLE = ["head", "haL", "haR", "ftL", "ftR"].map(n => IDX[n]);
-const BALANCE = ["neck", "hiL", "hiR", "knL", "knR", "ftL", "ftR"].map(n => IDX[n]);
-
-const SKINS = ["#f3d5c0", "#e8bd9c", "#d6a07a", "#c08560", "#9c6440", "#77482a", "#583421"];
-const HAIRS = ["#17110d", "#2e1f15", "#4a2f1c", "#6e4527", "#a07040", "#c9a466", "#2b2b2b", "#8a8a8a"];
-const TOPS = ["#f1f0ec", "#1e2638", "#8f2f2f", "#3d5e49", "#c4a476", "#66758e", "#d9c3a5", "#262626", "#6c3c55", "#2f5d7c"];
-const BOTTOMS = ["#3b5a85", "#2a3a56", "#1c1c1e", "#54443a", "#b39f7e", "#474c54", "#6b7f99"];
-const SHOES = ["#ecebe7", "#151515", "#5e3a22", "#3a3a3a", "#a83a32"];
-
-function shade(hex, amt) {
-  const n = parseInt(hex.slice(1), 16);
-  const f = c => clamp(Math.round(amt < 0 ? c * (1 + amt) : c + (255 - c) * amt), 0, 255);
-  return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
-}
-
-function makeLook() {
-  const fem = Math.random() < 0.5;
-  const skin = pick(SKINS);
-  return {
-    skin, skinLight: shade(skin, 0.18), skinDark: shade(skin, -0.22),
-    hair: pick(HAIRS),
-    hairStyle: fem ? pick(["long", "long", "bun", "curly", "bob"]) : pick(["short", "short", "curly", "buzz", "bald"]),
-    clothes: fem ? pick(["tee", "long", "dress", "hoodie"]) : pick(["tee", "long", "hoodie"]),
-    top: pick(TOPS), bottom: pick(BOTTOMS), shoes: pick(SHOES),
-    eye: pick(["#3b2416", "#2a1a10", "#4a6b8a", "#4f6b3c"]),
-    beard: !fem && Math.random() < 0.3,
-    fem,
-  };
-}
-
-function makePerson(x, footY, size) {
-  const look = makeLook();
-  const per = {
-    size, look, x, gy: footY, dir: Math.random() < 0.5 ? -1 : 1,
-    state: "idle", stateT: 0, nextT: rand(0.5, 3), k: K_POSE, phase: rand(6), seed: rand(10),
-    pitch: look.fem ? rand(210, 290) : rand(105, 160),
-    lastVoice: 0, lastThud: 0, impact: 0, dizzy: 0, inBasket: false, held: false, tg: [],
-  };
-  per.pts = NAMES.map(n => {
-    const [jx, jy] = JOINTS[n];
-    const px = x + jx * size, py = footY + jy * size;
-    return { x: px, y: py, px, py, r: n === "head" ? size * 0.062 : size * 0.03, held: null, per };
-  });
-  per.rest = STICKS.map(([a, b]) => Math.hypot(per.pts[a].x - per.pts[b].x, per.pts[a].y - per.pts[b].y));
-  per.soft = SOFT.map(([a, b, k]) => Math.hypot(per.pts[a].x - per.pts[b].x, per.pts[a].y - per.pts[b].y) * k);
-  per.tg = per.pts.map(p => [p.x, p.y]);
-  return per;
-}
-
-function spawn() {
-  const n = portrait() ? 4 : 6;
-  const size = portrait() ? Math.min(H * 0.16, W * 0.34) : Math.min(H * 0.23, 190);
-  people = [];
-  people.portrait = portrait();
-  const onShelfN = portrait() ? 1 : 2;
-  for (let i = 0; i < n; i++) {
-    const onShelf = i < onShelfN;
-    const k = onShelf ? i : i - onShelfN;
-    const slots = onShelf ? onShelfN : n - onShelfN;
-    const x = onShelf ? shelf.x + shelf.w * (k + 0.5) / slots : 16 + (basket.x - 32) * (k + 0.5) / slots;
-    people.push(makePerson(x, onShelf ? shelf.y : floorY, size));
-  }
-  parts.length = 0;
-}
-
-// ---------- Manos (cámara + MediaPipe) y ratón ----------
-// Cada "puntero" es una mano o el ratón: posición suavizada, cuánto está pellizcando y qué sujeta
-const pointers = new Map();
-function pointer(id) {
-  if (!pointers.has(id)) pointers.set(id, { x: 0, y: 0, pinch: false, amt: 0, held: null, seen: 0, landmarks: null, init: false });
-  return pointers.get(id);
-}
-
-let landmarker = null, lastVideoTime = -1;
-
-async function startCamera() {
-  audioInit();
-  const err = document.getElementById("err");
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: "user" } });
-    video.srcObject = stream;
-    await video.play();
-  } catch (e) {
-    err.textContent = "No se pudo abrir la cámara (" + e.name + "). Puedes jugar con el ratón.";
-  }
-  document.getElementById("intro").hidden = true;
-  document.getElementById("hud").hidden = false;
-  try {
-    const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-    landmarker = await HandLandmarker.createFromOptions(fileset, {
-      baseOptions: {
-        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      numHands: 2,
-    });
-    statusEl.innerHTML = video.srcObject ? "Enseña la mano a la cámara" : "Modo ratón";
-  } catch (e) {
-    statusEl.textContent = "No cargó el modelo: modo ratón";
-    console.error(e);
-  }
-}
-document.getElementById("go").addEventListener("click", startCamera);
-document.getElementById("reset").addEventListener("click", () => { for (const p of pointers.values()) p.held = null; spawn(); });
-document.getElementById("mute").addEventListener("click", e => {
-  muted = !muted; audioInit();
-  e.currentTarget.textContent = "Sonido: " + (muted ? "no" : "sí");
-});
-
-// Normalizado del vídeo → píxeles de pantalla, con object-fit: cover y espejo
-function toScreen(lm) {
-  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
-  const s = Math.max(W / vw, H / vh);
-  const ox = (W - vw * s) / 2, oy = (H - vh * s) / 2;
-  return { x: (1 - lm.x) * vw * s + ox, y: lm.y * vh * s + oy };
-}
-
-function detectHands(now) {
-  if (!landmarker || !video.srcObject || video.readyState < 2) return;
-  if (video.currentTime === lastVideoTime) return;
-  lastVideoTime = video.currentTime;
-  const res = landmarker.detectForVideo(video, now);
-  const seen = new Set();
-  (res.landmarks || []).forEach((lms, i) => {
-    const hand = res.handednesses?.[i]?.[0]?.categoryName || "h" + i;
-    const id = "hand-" + hand;
-    seen.add(id);
-    const p = pointer(id);
-    const pts = lms.map(toScreen);
-    p.landmarks = pts;
-    // Pinza: distancia pulgar-índice relativa al tamaño de la mano, con histéresis
-    const size = Math.hypot(pts[0].x - pts[9].x, pts[0].y - pts[9].y) || 1;
-    const d = Math.hypot(pts[4].x - pts[8].x, pts[4].y - pts[8].y) / size;
-    p.pinch = p.pinch ? d < 0.5 : d < 0.32;
-    p.amt = clamp((0.75 - d) / (0.75 - 0.32), 0, 1);
-    const tx = (pts[4].x + pts[8].x) / 2, ty = (pts[4].y + pts[8].y) / 2;
-    if (!p.init) { p.x = tx; p.y = ty; p.init = true; }
-    p.x += (tx - p.x) * 0.55; p.y += (ty - p.y) * 0.55;
-    p.seen = now;
-  });
-  for (const [id, p] of pointers) {
-    if (id.startsWith("hand-") && !seen.has(id) && now - p.seen > 250) { release(p); pointers.delete(id); }
-  }
-  const n = [...pointers.keys()].filter(k => k.startsWith("hand-")).length;
-  statusEl.innerHTML = n ? `<b>${n}</b> mano${n > 1 ? "s" : ""} detectada${n > 1 ? "s" : ""}` : "Enseña la mano a la cámara";
-}
-
-// Ratón como mano de repuesto. El dedo sobre la pantalla no cuenta: en el móvil sólo se coge con la cámara
-const notTouch = e => e.pointerType !== "touch";
-cv.addEventListener("pointerdown", e => { if (!notTouch(e)) return; audioInit(); const p = pointer("mouse"); p.x = e.clientX; p.y = e.clientY; p.init = true; p.pinch = true; p.amt = 1; });
-addEventListener("pointermove", e => { if (!notTouch(e)) return; const p = pointer("mouse"); p.x = e.clientX; p.y = e.clientY; p.init = true; });
-addEventListener("pointerup", e => { if (!notTouch(e)) return; const p = pointers.get("mouse"); if (p) { p.pinch = false; p.amt = 0; } });
-
-function release(p) {
-  if (!p.held) return;
-  const pt = p.held, per = pt.per;
-  const speed = Math.hypot(pt.x - pt.px, pt.y - pt.py) / SUB_DT;
-  pt.held = null; p.held = null;
-  per.stateT = 0;
-  if (speed > 1300) say(per, "whee");
-}
-
-// Agarra el punto más cercano; cabeza, manos y pies tienen más alcance que el resto del cuerpo
-function updatePointers() {
-  for (const p of pointers.values()) {
-    if (p.pinch && !p.held) {
-      let best = null, bd = Infinity;
-      for (const per of people) {
-        const reach = Math.max(34, per.size * 0.16);
-        per.pts.forEach((pt, i) => {
-          if (pt.held) return;
-          const d = Math.hypot(pt.x - p.x, pt.y - p.y) / (GRABBABLE.includes(i) ? 1 : 0.55);
-          if (d < reach && d < bd) { best = pt; bd = d; }
-        });
-      }
-      if (best) {
-        p.held = best; best.held = p;
-        if (!best.per.held) say(best.per, "scream");
-      }
-    } else if (!p.pinch && p.held) {
-      release(p);
-    }
-  }
-}
-
-// ---------- Comportamiento: levantarse, pasear, huir, celebrar ----------
-const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-
-function walkRange(per) {
-  const m = per.size * 0.12;
-  if (per.gy === shelf.y) return [shelf.x + m, shelf.x + shelf.w - m];
-  if (per.inBasket) return [basket.x + m, basket.x + basket.w - m];
-  return per.x < basket.x ? [m, basket.x - m] : [basket.x + basket.w + m, W - m];
-}
-
-function toRagdoll(per) { per.state = "ragdoll"; per.stateT = 0; per.k = 0; }
-
-function brain(per, dt, t) {
-  const P = per.pts, s = per.size;
-  per.held = P.some(p => p.held);
-  per.stateT += dt;
-  per.dizzy = Math.max(0, per.dizzy - dt);
-  const hips = mid(P[IDX.hiL], P[IDX.hiR]);
-
-  if (per.held) { if (per.state !== "ragdoll") toRagdoll(per); per.stateT = 0; return; }
-
-  if (per.state === "ragdoll") {
-    let spd = 0, low = -Infinity;
-    for (const p of P) { spd += Math.hypot(p.x - p.px, p.y - p.py); low = Math.max(low, p.y); }
-    spd /= P.length;
-    const sup = supportAt(hips.x, low);
-    if (per.dizzy <= 0 && per.stateT > 0.9 && spd < 0.5 && sup - low < s * 0.12) {
-      per.state = "getup"; per.stateT = 0; per.x = hips.x; per.gy = sup;
-      // mira hacia donde tiene la cabeza
-      per.dir = P[IDX.head].x >= hips.x ? 1 : -1;
-    }
-    return;
-  }
-
-  if (per.state === "getup") {
-    per.k = K_POSE * clamp(per.stateT / 1.1, 0, 1) ** 1.5;
-    if (per.stateT > 1.25) { per.k = K_POSE; per.state = per.inBasket ? "cheer" : "idle"; per.stateT = 0; per.nextT = rand(0.5, 2); }
-  } else {
-    // ¿hay una mano cerca? (huyen de la mano que se acerca, no de la que está lejos)
-    let threat = null;
-    for (const p of pointers.values()) {
-      if (!p.init || p.held) continue;
-      const dx = per.x - p.x, dy = (per.gy - s * 0.5) - p.y;
-      if (Math.abs(dx) < s * 0.9 && Math.abs(dy) < s * 0.85) threat = p;
-    }
-    // tiempo de reacción: tardan un momento en darse cuenta, así se les puede pillar desprevenidos
-    per.alarm = threat ? Math.min(1, (per.alarm || 0) + dt) : Math.max(0, (per.alarm || 0) - dt * 2);
-    if (per.alarm < 0.3 && per.state !== "flee") threat = null;
-    if (per.inBasket) { if (per.state !== "cheer") { per.state = "cheer"; per.stateT = 0; } }
-    else if (threat) {
-      if (per.state !== "flee") say(per, "gasp");
-      per.state = "flee"; per.dir = Math.sign(per.x - threat.x) || 1;
-    } else if (per.state === "flee") { per.state = "idle"; per.stateT = 0; per.nextT = rand(0.4, 1.2); }
-    else if (per.state === "cheer") { per.state = "idle"; per.stateT = 0; }
-    if (per.state === "idle" && per.stateT > per.nextT) { per.state = "walk"; per.dir = Math.random() < 0.5 ? -1 : 1; per.stateT = 0; per.nextT = rand(2, 5); }
-    else if (per.state === "walk" && per.stateT > per.nextT) { per.state = "idle"; per.stateT = 0; per.nextT = rand(1, 4); }
-
-    const speed = per.state === "flee" ? s * 0.8 : per.state === "walk" ? s * 0.32 : 0;
-    if (speed) {
-      // no atravesar a otro que esté de pie delante (salvo huyendo)
-      if (per.state === "walk") for (const o of people) {
-        if (o !== per && o.k > 0 && o.gy === per.gy && (o.x - per.x) * per.dir > 0 && Math.abs(o.x - per.x) < s * 0.3) { per.dir *= -1; break; }
-      }
-      const nx = per.x + per.dir * speed * dt, [lo, hi] = walkRange(per);
-      if (nx < lo || nx > hi) {
-        if (per.state === "flee" && per.gy === shelf.y) {
-          // acorralado en la estantería: salta
-          toRagdoll(per); say(per, "whee");
-          for (const p of P) { p.px = p.x - per.dir * 5; p.py = p.y + 6; }
-          return;
-        }
-        per.dir *= -1;
-      } else per.x = nx;
-      per.phase += dt * speed / (s * 0.16);
-    }
-    per.x += (hips.x - per.x) * 0.04;
-  }
-
-  // pose objetivo y caída si algo le empuja demasiado
-  poseTargets(per, t);
-  // sólo cuentan tronco y piernas: mover los brazos (saludar, celebrar) no es un empujón
-  if (per.state !== "getup") {
-    let dev = 0;
-    for (const i of BALANCE) dev = Math.max(dev, Math.hypot(P[i].x - per.tg[i][0], P[i].y - per.tg[i][1]));
-    if (dev > s * 0.3) toRagdoll(per);
-  }
-}
-
-function poseTargets(per, t) {
-  const s = per.size, d = per.dir, st = per.state;
-  const moving = st === "walk" || st === "flee";
-  const ph = per.phase, sw = moving ? Math.sin(ph) : 0, cw = moving ? Math.cos(ph) : 0;
-  const stride = st === "flee" ? 0.15 : 0.085, lift = st === "flee" ? 0.07 : 0.035;
-  let bob = moving ? -Math.abs(Math.sin(ph)) * (st === "flee" ? 0.02 : 0.01) : Math.sin(t * 1.7 + per.seed) * 0.003;
-  const lean = st === "flee" ? 0.07 : moving ? 0.015 : 0;
-  const off = {};
-  // piernas: cada pie avanza y se levanta en su media fase
-  off.ftL = [d * stride * sw, -lift * Math.max(0, cw)];
-  off.ftR = [-d * stride * sw, -lift * Math.max(0, -cw)];
-  off.knL = [d * (stride * 0.55 * sw + 0.012 + lift * 0.4 * Math.max(0, cw)), -lift * 0.5 * Math.max(0, cw)];
-  off.knR = [d * (-stride * 0.55 * sw + 0.012 + lift * 0.4 * Math.max(0, -cw)), -lift * 0.5 * Math.max(0, -cw)];
-  // brazos al contrario que las piernas
-  off.haL = [-d * stride * 0.85 * sw + d * lean, 0]; off.haR = [d * stride * 0.85 * sw + d * lean, 0];
-  off.elL = [-d * stride * 0.4 * sw + d * lean, 0]; off.elR = [d * stride * 0.4 * sw + d * lean, 0];
-  for (const n of ["head", "neck", "shL", "shR"]) off[n] = [d * lean, 0];
-  if (st === "flee") { off.haL[1] = -0.06; off.haR[1] = -0.06; off.elL[0] -= d * 0.03; off.elR[0] -= d * 0.03; }
-  if (st === "cheer") {
-    bob = -Math.abs(Math.sin(t * 5 + per.seed)) * 0.035;
-    off.haL = [0.02 + Math.sin(t * 7) * 0.02, -0.6]; off.haR = [-0.02 + Math.cos(t * 7) * 0.02, -0.6];
-    off.elL = [-0.06, -0.3]; off.elR = [0.06, -0.3];
-  }
-  NAMES.forEach((n, i) => {
-    const [jx, jy] = JOINTS[n], [ox, oy] = off[n] || [0, 0];
-    const foot = n === "ftL" || n === "ftR";
-    per.tg[i][0] = per.x + (jx + ox) * s;
-    per.tg[i][1] = per.gy + (jy + oy + (foot ? 0 : bob)) * s - (foot ? per.pts[i].r : 0);
-  });
-}
-
-// ---------- Física ----------
-function collideStatic(pt, carried, per) {
-  const r = pt.r;
-  const v = (pt.y - pt.py) / SUB_DT;
-  // suelo con rozamiento
-  if (pt.y + r > floorY) {
-    if (v > per.impact) per.impact = v;
-    pt.y = floorY - r; pt.px = pt.x - (pt.x - pt.px) * 0.55;
-  }
-  // estantería: sólo si llega desde arriba, y no para quien va cogido (así se puede bajar a través de ella)
-  if (!carried && pt.x > shelf.x - 10 && pt.x < shelf.x + shelf.w + 10 && pt.y + r > shelf.y && pt.py + r <= shelf.y + 3) {
-    if (v > per.impact) per.impact = v;
-    pt.y = shelf.y - r; pt.px = pt.x - (pt.x - pt.px) * 0.55;
-  }
-  if (pt.x < r) pt.x = r; else if (pt.x > W - r) pt.x = W - r;
-  if (pt.y < -H) pt.y = -H;
-  // paredes de la cesta
-  const b = basket;
-  for (const wx of [b.x, b.x + b.w]) {
-    if (pt.y + r > b.y && Math.abs(pt.x - wx) < r + 4) {
-      if (pt.py + r <= b.y + 2) pt.y = b.y - r;
-      else pt.x = pt.px < wx ? wx - r - 4 : wx + r + 4;
-    }
-  }
-}
-
-function step(dt) {
-  SUB_DT = dt;
-  const g = GRAVITY * dt * dt;
-  for (const per of people) {
-    const posed = per.k > 0;
-    const damp = posed ? 0.88 : DAMP;
-    per.pts.forEach((pt, i) => {
-      if (pt.held) {
-        pt.px = pt.x; pt.py = pt.y;
-        pt.x += (pt.held.x - pt.x) * 0.7; pt.y += (pt.held.y - pt.y) * 0.7;
-        return;
-      }
-      const vx = (pt.x - pt.px) * damp, vy = (pt.y - pt.py) * damp;
-      pt.px = pt.x; pt.py = pt.y;
-      pt.x += vx; pt.y += vy + g;
-      if (posed) { pt.x += (per.tg[i][0] - pt.x) * per.k; pt.y += (per.tg[i][1] - pt.y) * per.k; }
-    });
-  }
-  for (let it = 0; it < ITER; it++) {
-    for (const per of people) {
-      const P = per.pts;
-      STICKS.forEach(([a, b], k) => satisfy(P[a], P[b], per.rest[k], false));
-      SOFT.forEach(([a, b], k) => satisfy(P[a], P[b], per.soft[k], true));
-      for (const pt of P) if (!pt.held) collideStatic(pt, per.held, per);
-    }
-    if (it % 3 === 0) collidePeople();
-  }
-}
-
-function satisfy(a, b, len, minOnly) {
-  const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.001;
-  if (minOnly && d >= len) return;
-  const wa = a.held ? 0 : 1, wb = b.held ? 0 : 1, w = wa + wb;
-  if (!w) return;
-  const diff = (d - len) / d / w;
-  a.x += dx * diff * wa; a.y += dy * diff * wa;
-  b.x -= dx * diff * wb; b.y -= dy * diff * wb;
-}
-
-function collidePeople() {
-  for (let i = 0; i < people.length; i++) for (let j = i + 1; j < people.length; j++) {
-    const A = people[i].pts, B = people[j].pts;
-    for (const a of A) for (const b of B) {
-      const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, min = (a.r + b.r) * 1.5;
-      if (d2 >= min * min || d2 === 0) continue;
-      const d = Math.sqrt(d2), push = (min - d) / d * 0.5;
-      const wa = a.held ? 0 : 1, wb = b.held ? 0 : 1;
-      a.x -= dx * push * wa; a.y -= dy * push * wa;
-      b.x += dx * push * wb; b.y += dy * push * wb;
-    }
-  }
-}
-
-// Golpes: sonido según la fuerza, polvo y, si es muy fuerte, se queda un rato en el suelo
-function reactions(now) {
-  for (const per of people) {
-    const v = per.impact; per.impact = 0;
-    if (v < 600 || now - per.lastThud < 160) continue;
-    per.lastThud = now;
-    const P = per.pts; let lowP = P[0];
-    for (const p of P) if (p.y > lowP.y) lowP = p;
-    thud(clamp((v - 600) / 2000, 0, 1));
-    dust(lowP.x, lowP.y + lowP.r, Math.round(clamp(v / 250, 3, 14)), per.size);
-    if (v > 1500 && per.state === "ragdoll") { per.dizzy = 1.8; say(per, "ay"); }
-  }
-}
-
-function countBasket() {
-  let n = 0;
-  for (const per of people) {
-    const P = per.pts, h = mid(P[IDX.hiL], P[IDX.hiR]);
-    const was = per.inBasket;
-    per.inBasket = !per.held && h.x > basket.x && h.x < basket.x + basket.w && h.y > basket.y - per.size * 0.12;
-    if (per.inBasket && !was) { applause(); setTimeout(() => say(per, "yay"), 600); }
-    if (per.inBasket) n++;
-  }
-  countEl.textContent = n;
-}
-
-// ---------- Partículas: polvo al caer ----------
-const parts = [];
-function dust(x, y, n, s) {
-  for (let i = 0; i < n; i++) {
-    const a = rand(Math.PI), sp = rand(0.3, 1) * s * 0.9;
-    parts.push({ x: x + rand(-1, 1) * s * 0.05, y: y - 2, vx: Math.cos(a) * sp * (Math.random() < 0.5 ? -1 : 1), vy: -Math.sin(a) * sp * 0.35, life: 0, max: rand(0.5, 0.9), r: s * rand(0.015, 0.03) });
-  }
-}
-function updateParts(dt) {
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const q = parts[i];
-    q.life += dt; q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= 0.9; q.vy *= 0.9; q.r *= 1.02;
-    if (q.life > q.max) parts.splice(i, 1);
-  }
-}
-function drawParts() {
-  for (const q of parts) {
-    const a = 0.28 * (1 - q.life / q.max);
-    const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, q.r);
-    g.addColorStop(0, `rgba(205,195,180,${a})`); g.addColorStop(1, "rgba(205,195,180,0)");
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2); ctx.fill();
-  }
-}
-
-// ---------- Dibujo de personas ----------
-// Segmento con volumen: cápsula de grosor variable + degradado de luz (luz arriba a la izquierda)
-function capsule(a, b, ra, rb) {
-  const ang = Math.atan2(b.y - a.y, b.x - a.x);
-  ctx.beginPath();
-  ctx.arc(a.x, a.y, ra, ang + Math.PI / 2, ang - Math.PI / 2);
-  ctx.arc(b.x, b.y, rb, ang - Math.PI / 2, ang + Math.PI / 2);
-  ctx.closePath();
-}
-function seg(a, b, ra, rb, color, dark = 0) {
-  capsule(a, b, ra, rb);
-  ctx.fillStyle = color; ctx.fill();
-  const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
-  let nx = -dy / L, ny = dx / L;
-  if (nx + ny > 0) { nx = -nx; ny = -ny; }
-  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, r = Math.max(ra, rb);
-  const g = ctx.createLinearGradient(mx + nx * r, my + ny * r, mx - nx * r, my - ny * r);
-  g.addColorStop(0, "rgba(255,255,255,0.2)"); g.addColorStop(0.42, "rgba(255,255,255,0)");
-  g.addColorStop(1, `rgba(0,0,0,${0.34 + dark})`);
-  ctx.fillStyle = g; ctx.fill();
-}
-const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
-
-function moodOf(per) {
-  if (per.held) return "scream";
-  if (per.state === "ragdoll") return per.dizzy > 0 || per.stateT < 1 ? "pain" : "neutral";
-  if (per.state === "getup") return "neutral";
-  if (per.state === "flee") return "scared";
-  if (per.state === "cheer") return "happy";
-  return "calm";
-}
-
-function drawArm(per, side, dark) {
-  const P = per.pts, J = n => P[IDX[n]], s = per.size, L = per.look;
-  const el = J("el" + side), ha = J("ha" + side);
-  // el brazo nace un poco por debajo del hombro, para que la manga no abulte por encima
-  const sh = lerp(J("sh" + side), el, 0.1);
-  const longSleeve = L.clothes === "long" || L.clothes === "hoodie";
-  seg(sh, el, s * 0.027, s * 0.023, L.skin, dark);
-  seg(el, ha, s * 0.022, s * 0.017, longSleeve ? L.top : L.skin, dark);
-  if (longSleeve) seg(sh, el, s * 0.03, s * 0.026, L.top, dark);
-  else if (L.clothes !== "dress") seg(sh, lerp(sh, el, 0.5), s * 0.031, s * 0.028, L.top, dark);
-  // mano
-  const ang = Math.atan2(ha.y - el.y, ha.x - el.x);
-  ctx.save(); ctx.translate(ha.x, ha.y); ctx.rotate(ang);
-  ctx.fillStyle = L.skin; ctx.beginPath(); ctx.ellipse(s * 0.018, 0, s * 0.028, s * 0.018, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = `rgba(0,0,0,${0.18 + dark})`; ctx.beginPath(); ctx.ellipse(s * 0.02, s * 0.006, s * 0.022, s * 0.01, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
-}
-
-function drawLeg(per, side, dark) {
-  const P = per.pts, J = n => P[IDX[n]], s = per.size, L = per.look;
-  const hi = J("hi" + side), kn = J("kn" + side), ft = J("ft" + side);
-  const legColor = L.clothes === "dress" ? L.skin : L.bottom;
-  seg(hi, kn, s * 0.047, s * 0.034, legColor, dark);
-  seg(kn, ft, s * 0.033, s * 0.022, legColor, dark);
-  // zapato orientado según la espinilla y hacia donde mira
-  const shin = Math.atan2(ft.y - kn.y, ft.x - kn.x), ang = shin - per.dir * Math.PI / 2;
-  ctx.save(); ctx.translate(ft.x, ft.y); ctx.rotate(ang);
-  ctx.fillStyle = L.shoes; ctx.beginPath(); ctx.ellipse(s * 0.024, 0, s * 0.05, s * 0.022, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = `rgba(0,0,0,${0.3 + dark})`; ctx.fillRect(-s * 0.025, s * 0.012, s * 0.098, s * 0.01);
-  ctx.restore();
-}
-
-function drawTorso(per) {
-  const P = per.pts, J = n => P[IDX[n]], s = per.size, L = per.look;
-  const sL = J("shL"), sR = J("shR"), hL = J("hiL"), hR = J("hiR");
-  const ax = sR.x - sL.x, ay = sR.y - sL.y, bx = hR.x - hL.x, by = hR.y - hL.y;
-  const sLo = { x: sL.x - ax * 0.1, y: sL.y - ay * 0.1 }, sRo = { x: sR.x + ax * 0.1, y: sR.y + ay * 0.1 };
-  const hLo = { x: hL.x - bx * 0.45, y: hL.y - by * 0.45 }, hRo = { x: hR.x + bx * 0.45, y: hR.y + by * 0.45 };
-  const wL = lerp(lerp(sL, hL, 0.62), lerp(sR, hR, 0.62), 0.04), wR = lerp(lerp(sR, hR, 0.62), lerp(sL, hL, 0.62), 0.04);
-  const body = (top, a, b, c, d2, e, f) => {
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-    ctx.quadraticCurveTo(c.x, c.y, d2.x, d2.y); ctx.lineTo(e.x, e.y);
-    ctx.quadraticCurveTo(f.x, f.y, a.x, a.y); ctx.closePath();
-    ctx.fillStyle = top; ctx.fill();
-    ctx.lineWidth = s * 0.02; ctx.strokeStyle = top; ctx.stroke();
-  };
-  // cadera/pantalón
-  if (L.clothes !== "dress") {
-    body(L.bottom, wL, wR, wR, hRo, hLo, hLo);
-  }
-  // camiseta hasta un poco por debajo de la cintura
-  const hemL = lerp(wL, hLo, 0.45), hemR = lerp(wR, hRo, 0.45);
-  body(L.top, sLo, sRo, wR, hemR, hemL, wL);
-  // falda del vestido
-  if (L.clothes === "dress") {
-    const kL = J("knL"), kR = J("knR");
-    const skL = { x: Math.min(kL.x, kR.x) - s * 0.05, y: Math.max(kL.y, kR.y) + s * 0.02 }, skR = { x: Math.max(kL.x, kR.x) + s * 0.05, y: Math.max(kL.y, kR.y) + s * 0.02 };
-    ctx.beginPath(); ctx.moveTo(hemL.x, hemL.y); ctx.lineTo(hemR.x, hemR.y); ctx.lineTo(skR.x, skR.y);
-    ctx.quadraticCurveTo((skL.x + skR.x) / 2, Math.max(skL.y, skR.y) + s * 0.025, skL.x, skL.y); ctx.closePath();
-    ctx.fillStyle = L.top; ctx.fill();
-  }
-  // luz y sombra del tronco
-  const g = ctx.createLinearGradient(sLo.x, sLo.y, sRo.x, sRo.y);
-  g.addColorStop(0, "rgba(255,255,255,0.14)"); g.addColorStop(0.45, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(0,0,0,0.3)");
-  ctx.beginPath(); ctx.moveTo(sLo.x, sLo.y); ctx.lineTo(sRo.x, sRo.y); ctx.lineTo(hRo.x, hRo.y); ctx.lineTo(hLo.x, hLo.y); ctx.closePath();
-  ctx.fillStyle = g; ctx.fill();
-  // cinturón / costuras
-  if (L.clothes !== "dress") {
-    ctx.strokeStyle = "rgba(0,0,0,0.25)"; ctx.lineWidth = Math.max(1, s * 0.008);
-    ctx.beginPath(); ctx.moveTo(hemL.x, hemL.y); ctx.lineTo(hemR.x, hemR.y); ctx.stroke();
-  }
-  // escote / capucha
-  const nk = J("neck");
-  if (L.clothes === "hoodie") {
-    ctx.fillStyle = shade(L.top, -0.25);
-    ctx.beginPath(); ctx.ellipse(nk.x, nk.y + s * 0.012, s * 0.05, s * 0.022, Math.atan2(ay, ax), 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = Math.max(1, s * 0.005);
-    ctx.beginPath(); ctx.moveTo(nk.x - s * 0.015, nk.y + s * 0.03); ctx.lineTo(nk.x - s * 0.017, nk.y + s * 0.09);
-    ctx.moveTo(nk.x + s * 0.015, nk.y + s * 0.03); ctx.lineTo(nk.x + s * 0.017, nk.y + s * 0.09); ctx.stroke();
-  } else {
-    ctx.fillStyle = per.look.skinDark;
-    ctx.beginPath(); ctx.ellipse(nk.x, nk.y + s * 0.01, s * 0.03, s * 0.018, Math.atan2(ay, ax), 0, Math.PI); ctx.fill();
-  }
-}
-
-function drawHead(per, t) {
-  const P = per.pts, J = n => P[IDX[n]], s = per.size, L = per.look, mood = moodOf(per);
-  const hd = J("head"), nk = J("neck");
-  seg(nk, lerp(nk, hd, 0.7), s * 0.021, s * 0.02, L.skin, 0.05);
-  const ang = Math.atan2(hd.y - nk.y, hd.x - nk.x) + Math.PI / 2;
-  const rx = s * 0.05, ry = s * 0.062;
-  const facing = per.state === "walk" || per.state === "flee" ? per.dir : 0;
-  const fo = facing * rx * 0.14;
-  ctx.save(); ctx.translate(hd.x, hd.y); ctx.rotate(ang);
-
-  // pelo largo por detrás
-  if (L.hairStyle === "long") {
-    ctx.fillStyle = shade(L.hair, -0.12);
-    ctx.beginPath(); ctx.ellipse(0, ry * 0.35, rx * 1.18, ry * 1.25, 0, Math.PI * 1.0, Math.PI * 2.0); ctx.lineTo(rx * 1.05, ry * 1.5); ctx.lineTo(-rx * 1.05, ry * 1.5); ctx.closePath(); ctx.fill();
-  }
-  // orejas
-  ctx.fillStyle = L.skinDark;
-  for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(sx * rx * 0.97 + fo * 0.3, ry * 0.06, rx * 0.15, ry * 0.19, 0, 0, Math.PI * 2); ctx.fill(); }
-  // cara con volumen
-  const fg = ctx.createRadialGradient(-rx * 0.35 + fo, -ry * 0.35, rx * 0.1, 0, 0, ry * 1.1);
-  fg.addColorStop(0, L.skinLight); fg.addColorStop(0.55, L.skin); fg.addColorStop(1, L.skinDark);
-  ctx.fillStyle = fg;
-  ctx.beginPath(); ctx.moveTo(-rx, -ry * 0.1);
-  ctx.bezierCurveTo(-rx, -ry * 1.2, rx, -ry * 1.2, rx, -ry * 0.1);
-  ctx.bezierCurveTo(rx, ry * 0.65, rx * 0.45, ry * 1.02, 0, ry * 1.02);
-  ctx.bezierCurveTo(-rx * 0.45, ry * 1.02, -rx, ry * 0.65, -rx, -ry * 0.1);
-  ctx.fill();
-  if (L.beard) {
-    ctx.fillStyle = shade(L.hair, 0.05); ctx.globalAlpha = 0.85;
-    ctx.beginPath(); ctx.moveTo(-rx * 0.92, ry * 0.15);
-    ctx.bezierCurveTo(-rx * 0.85, ry * 0.75, -rx * 0.4, ry * 1.08, 0, ry * 1.08);
-    ctx.bezierCurveTo(rx * 0.4, ry * 1.08, rx * 0.85, ry * 0.75, rx * 0.92, ry * 0.15);
-    ctx.bezierCurveTo(rx * 0.6, ry * 0.45, rx * 0.3, ry * 0.4, 0, ry * 0.42);
-    ctx.bezierCurveTo(-rx * 0.3, ry * 0.4, -rx * 0.6, ry * 0.45, -rx * 0.92, ry * 0.15);
-    ctx.fill(); ctx.globalAlpha = 1;
-  }
-
-  // rasgos: pequeños y sobrios, con proporciones reales
-  const lw = Math.max(0.8, rx * 0.07);
-  const ey = ry * 0.05, ex = rx * 0.4;
-  const blink = mood === "calm" && ((t / 1000 + per.seed) % 4.2) < 0.13;
-  const closed = mood === "pain" || blink;
-  const wide = mood === "scream" || mood === "scared";
-  for (const sx of [-1, 1]) {
-    const x = sx * ex + fo;
-    if (closed) {
-      ctx.strokeStyle = shade(L.skin, -0.55); ctx.lineWidth = lw;
-      ctx.beginPath(); ctx.moveTo(x - rx * 0.15, ey); ctx.quadraticCurveTo(x, ey + ry * (mood === "pain" ? -0.06 : 0.05), x + rx * 0.15, ey); ctx.stroke();
-    } else {
-      ctx.fillStyle = "#f4efe9";
-      ctx.beginPath(); ctx.ellipse(x, ey, rx * 0.17, ry * (wide ? 0.1 : 0.068), 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = L.eye;
-      ctx.beginPath(); ctx.arc(x + fo * 0.5, ey, rx * (wide ? 0.075 : 0.085), 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#0a0a0a";
-      ctx.beginPath(); ctx.arc(x + fo * 0.5, ey, rx * 0.04, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = shade(L.skin, -0.45); ctx.lineWidth = lw * 0.9;
-      ctx.beginPath(); ctx.ellipse(x, ey, rx * 0.18, ry * (wide ? 0.1 : 0.07), 0, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
-    }
-    // cejas
-    const by = ey - ry * (wide ? 0.3 : 0.22), tilt = mood === "pain" ? 0.06 : wide ? -0.04 : 0;
-    ctx.strokeStyle = shade(L.hair, -0.1); ctx.lineWidth = lw * 1.4;
-    ctx.beginPath(); ctx.moveTo(x - sx * rx * 0.2, by + ry * tilt * -1); ctx.lineTo(x + sx * rx * 0.2, by + ry * tilt * 0.6); ctx.stroke();
-  }
-  // nariz
-  ctx.strokeStyle = shade(L.skin, -0.35); ctx.lineWidth = lw;
-  ctx.beginPath(); ctx.moveTo(fo + rx * 0.02, ey + ry * 0.08); ctx.quadraticCurveTo(fo + rx * 0.12 + fo * 0.3, ey + ry * 0.36, fo - rx * 0.06, ey + ry * 0.4); ctx.stroke();
-  // boca
-  const my = ry * 0.66, mx = fo * 0.8;
-  ctx.strokeStyle = "#7c3b35"; ctx.fillStyle = "#3a1414"; ctx.lineWidth = lw * 1.1;
-  ctx.beginPath();
-  if (mood === "scream") { ctx.ellipse(mx, my + ry * 0.04, rx * 0.15, ry * 0.15, 0, 0, Math.PI * 2); ctx.fill(); }
-  else if (mood === "scared") { ctx.ellipse(mx, my, rx * 0.09, ry * 0.07, 0, 0, Math.PI * 2); ctx.fill(); }
-  else if (mood === "happy") {
-    ctx.moveTo(mx - rx * 0.26, my - ry * 0.04); ctx.quadraticCurveTo(mx, my + ry * 0.24, mx + rx * 0.26, my - ry * 0.04); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "#f2ede6"; ctx.fillRect(mx - rx * 0.2, my - ry * 0.035, rx * 0.4, ry * 0.05);
-  }
-  else if (mood === "pain") { ctx.moveTo(mx - rx * 0.2, my + ry * 0.02); ctx.quadraticCurveTo(mx, my - ry * 0.06, mx + rx * 0.2, my + ry * 0.02); ctx.stroke(); }
-  else if (mood === "calm") { ctx.moveTo(mx - rx * 0.2, my); ctx.quadraticCurveTo(mx, my + ry * 0.07, mx + rx * 0.2, my); ctx.stroke(); }
-  else { ctx.moveTo(mx - rx * 0.17, my); ctx.lineTo(mx + rx * 0.17, my); ctx.stroke(); }
-
-  // pelo por delante
-  ctx.fillStyle = L.hair;
-  const cap = (top = 1.12, low = 0.0) => {
-    ctx.beginPath(); ctx.moveTo(-rx * 1.04, -ry * low);
-    ctx.bezierCurveTo(-rx * 1.1, -ry * top * 1.15, rx * 1.1, -ry * top * 1.15, rx * 1.04, -ry * low);
-    ctx.bezierCurveTo(rx * 0.7, -ry * 0.55, -rx * 0.1 + fo, -ry * 0.62, -rx * 1.04, -ry * low);
-    ctx.fill();
-  };
-  switch (L.hairStyle) {
-    case "short": cap(1.1, 0.12); break;
-    case "buzz": ctx.globalAlpha = 0.7; cap(1.06, 0.2); ctx.globalAlpha = 1; break;
-    case "bob": cap(1.12, 0.0);
-      ctx.beginPath(); ctx.ellipse(-rx * 0.95, ry * 0.15, rx * 0.22, ry * 0.5, 0.1, 0, Math.PI * 2); ctx.ellipse(rx * 0.95, ry * 0.15, rx * 0.22, ry * 0.5, -0.1, 0, Math.PI * 2); ctx.fill(); break;
-    case "long": cap(1.12, 0.0);
-      ctx.beginPath(); ctx.ellipse(-rx * 0.98, ry * 0.35, rx * 0.2, ry * 0.75, 0.05, 0, Math.PI * 2); ctx.ellipse(rx * 0.98, ry * 0.35, rx * 0.2, ry * 0.75, -0.05, 0, Math.PI * 2); ctx.fill(); break;
-    case "bun": cap(1.1, 0.05); ctx.beginPath(); ctx.arc(0, -ry * 1.12, rx * 0.36, 0, Math.PI * 2); ctx.fill(); break;
-    case "curly": cap(1.12, 0.05);
-      for (let k = 0; k <= 7; k++) { const a = Math.PI * (1.02 + k * 0.137); ctx.beginPath(); ctx.arc(Math.cos(a) * rx * 1.0, Math.sin(a) * ry * 0.92 - ry * 0.08, rx * 0.3, 0, Math.PI * 2); ctx.fill(); }
-      break;
-    case "bald": {
-      const sg = ctx.createRadialGradient(-rx * 0.3, -ry * 0.75, 0, -rx * 0.3, -ry * 0.75, rx * 0.5);
-      sg.addColorStop(0, "rgba(255,255,255,0.25)"); sg.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(-rx * 0.3, -ry * 0.75, rx * 0.5, 0, Math.PI * 2); ctx.fill(); break;
-    }
-  }
-  if (L.hairStyle !== "bald") {
-    const hg = ctx.createLinearGradient(-rx, -ry * 1.2, rx, -ry * 0.3);
-    hg.addColorStop(0, "rgba(255,255,255,0.14)"); hg.addColorStop(1, "rgba(0,0,0,0.2)");
-    ctx.fillStyle = hg; ctx.globalCompositeOperation = "source-atop";
-    ctx.fillRect(-rx * 1.5, -ry * 1.6, rx * 3, ry * 1.4);
-    ctx.globalCompositeOperation = "source-over";
-  }
-  ctx.restore();
-}
-
-function drawShadow(per) {
-  const P = per.pts, s = per.size, h = mid(P[IDX.hiL], P[IDX.hiR]);
-  let low = -Infinity; for (const p of P) low = Math.max(low, p.y + p.r);
-  const sup = supportAt(h.x, low - 2), gap = Math.max(0, sup - low);
-  const a = 0.5 * clamp(1 - gap / (s * 1.4), 0.12, 1), w = s * (0.17 + gap / (s * 6));
-  ctx.save(); ctx.translate(h.x, sup); ctx.scale(1, 0.16);
-  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, w);
-  g.addColorStop(0, `rgba(0,0,0,${a})`); g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, w, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
-}
-
-function drawPerson(per, t) {
-  ctx.lineCap = "round"; ctx.lineJoin = "round";
-  // el lado de atrás según hacia dónde mira, un poco más oscuro
-  const back = per.dir > 0 ? "L" : "R", front = back === "L" ? "R" : "L";
-  drawArm(per, back, 0.12);
-  drawLeg(per, back, 0.1);
-  drawLeg(per, front, 0);
-  drawTorso(per);
-  drawArm(per, front, 0);
-  drawHead(per, t);
-}
-
-// ---------- Escenario: luz, suelo, estantería de madera y cesta de mimbre ----------
-function drawEnvironment() {
-  // viñeta para centrar la mirada
-  const vg = ctx.createRadialGradient(W / 2, H * 0.45, Math.min(W, H) * 0.35, W / 2, H * 0.5, Math.max(W, H) * 0.8);
-  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
-  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
-  // suelo: una tarima oscura que se funde con la habitación
-  const fg = ctx.createLinearGradient(0, floorY - H * 0.06, 0, H);
-  fg.addColorStop(0, "rgba(14,12,18,0)"); fg.addColorStop(0.35, "rgba(14,12,18,0.55)"); fg.addColorStop(1, "rgba(8,7,10,0.9)");
-  ctx.fillStyle = fg; ctx.fillRect(0, floorY - H * 0.06, W, H);
-  const lg = ctx.createLinearGradient(0, 0, W, 0);
-  lg.addColorStop(0, "rgba(255,255,255,0)"); lg.addColorStop(0.5, "rgba(255,255,255,0.18)"); lg.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = lg; ctx.fillRect(0, floorY, W, 1.5);
-}
-
-function drawShelf() {
-  const x = shelf.x - 12, y = shelf.y, w = shelf.w + 24, th = Math.max(12, H * 0.016);
-  // sombra en la pared
-  const sg = ctx.createLinearGradient(0, y + th, 0, y + th + H * 0.06);
-  sg.addColorStop(0, "rgba(0,0,0,0.35)"); sg.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = sg; ctx.fillRect(x + 6, y + th, w - 12, H * 0.06);
-  // escuadras metálicas
-  for (const bx of [x + w * 0.14, x + w * 0.86]) {
-    ctx.fillStyle = "#2b2b2e";
-    ctx.beginPath(); ctx.moveTo(bx - 3, y + th); ctx.lineTo(bx + 3, y + th); ctx.lineTo(bx + 3, y + th + H * 0.05); ctx.lineTo(bx - 3, y + th + 4); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.15)"; ctx.fillRect(bx - 3, y + th, 1.5, H * 0.045);
-  }
-  // tablón de roble
-  const wg = ctx.createLinearGradient(0, y, 0, y + th);
-  wg.addColorStop(0, "#c0915c"); wg.addColorStop(0.25, "#a6773f"); wg.addColorStop(1, "#6e4a24");
-  ctx.fillStyle = wg; roundRect(x, y, w, th, 2.5); ctx.fill();
-  ctx.strokeStyle = "rgba(60,32,10,0.28)"; ctx.lineWidth = 1;
-  for (let k = 1; k <= 3; k++) {
-    const gy = y + th * k / 4.2;
-    ctx.beginPath(); ctx.moveTo(x + 4, gy);
-    for (let gx = x + 4; gx < x + w - 4; gx += 22) ctx.lineTo(gx, gy + Math.sin(gx * 0.05 + k * 2) * 0.8);
-    ctx.stroke();
-  }
-  ctx.fillStyle = "rgba(255,240,215,0.35)"; ctx.fillRect(x + 2, y, w - 4, 1.2);
-}
-
-function basketPath(b) {
-  ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + b.w, b.y);
-  ctx.lineTo(b.x + b.w - b.w * 0.06, b.y + b.h); ctx.lineTo(b.x + b.w * 0.06, b.y + b.h); ctx.closePath();
-}
-function drawBasketBack() {
-  const b = basket;
-  ctx.fillStyle = "#2a1c10";
-  ctx.beginPath(); ctx.ellipse(b.x + b.w / 2, b.y, b.w / 2, b.h * 0.12, 0, Math.PI, Math.PI * 2); ctx.fill();
-}
-function drawBasketFront() {
-  const b = basket;
-  ctx.save(); basketPath(b); ctx.clip();
-  const g = ctx.createLinearGradient(b.x, 0, b.x + b.w, 0);
-  g.addColorStop(0, "#9a6f3c"); g.addColorStop(0.4, "#c29257"); g.addColorStop(1, "#7a5228");
-  ctx.fillStyle = g; ctx.fillRect(b.x, b.y, b.w, b.h);
-  // trenzado de mimbre
-  const rows = Math.max(5, Math.round(b.h / 11)), rh = b.h / rows, cols = Math.round(b.w / 16);
-  for (let r = 0; r < rows; r++) for (let c = 0; c <= cols; c++) {
-    const cx = b.x + (c + (r % 2) * 0.5) * (b.w / cols), cy = b.y + r * rh + rh / 2;
-    ctx.fillStyle = "rgba(255,225,170,0.18)";
-    ctx.beginPath(); ctx.ellipse(cx, cy - rh * 0.12, b.w / cols * 0.42, rh * 0.32, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(40,22,6,0.3)";
-    ctx.fillRect(cx + b.w / cols * 0.45, b.y + r * rh, 1.2, rh);
-  }
-  const sh = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
-  sh.addColorStop(0, "rgba(0,0,0,0)"); sh.addColorStop(1, "rgba(0,0,0,0.35)");
-  ctx.fillStyle = sh; ctx.fillRect(b.x, b.y, b.w, b.h);
-  ctx.restore();
-  // borde
-  ctx.strokeStyle = "#8b5e2e"; ctx.lineWidth = Math.max(5, b.h * 0.07); ctx.lineCap = "round";
-  ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + b.w, b.y); ctx.stroke();
-  ctx.strokeStyle = "rgba(255,230,190,0.35)"; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(b.x + 3, b.y - b.h * 0.025); ctx.lineTo(b.x + b.w - 3, b.y - b.h * 0.025); ctx.stroke();
-}
-
-const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
-
-function draw(t) {
-  ctx.clearRect(0, 0, W, H);
-  drawEnvironment();
-  drawShelf();
-  drawBasketBack();
-  for (const per of people) drawShadow(per);
-  drawParts();
-  // quien está colgando, delante de todo; los de la cesta, detrás de su pared delantera
-  const inB = people.filter(p => p.inBasket && !p.held);
-  const rest = people.filter(p => !inB.includes(p)).sort((a, b) => a.held - b.held);
-  for (const per of inB) drawPerson(per, t);
-  drawBasketFront();
-  for (const per of rest) drawPerson(per, t);
-
-  // manos detectadas (discretas) y anillo que se cierra según la pinza
-  for (const [id, p] of pointers) {
-    if (p.landmarks) {
-      ctx.strokeStyle = "rgba(124,245,200,.35)"; ctx.lineWidth = 2; ctx.lineCap = "round";
-      ctx.beginPath();
-      for (const [a, c] of BONES) { ctx.moveTo(p.landmarks[a].x, p.landmarks[a].y); ctx.lineTo(p.landmarks[c].x, p.landmarks[c].y); }
-      ctx.stroke();
-    }
-    if (!p.init || (id === "mouse" && !p.pinch && !p.held)) continue;
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(244,241,255,.35)";
-    ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = p.pinch ? "#ffcf4a" : "rgba(244,241,255,.95)";
-    ctx.beginPath(); ctx.arc(p.x, p.y, 16, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.amt); ctx.stroke();
-    if (p.pinch) { ctx.fillStyle = "#ffcf4a"; ctx.beginPath(); ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2); ctx.fill(); }
-  }
-}
-
-function roundRect(x, y, w, h, r) {
-  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
-}
-
-// ---------- Bucle ----------
-let last = performance.now();
-function frame(now) {
-  const dt = Math.min(0.033, (now - last) / 1000) || 0.016;
-  last = now;
-  // un fallo en un fotograma no debe congelar la escena entera
-  try {
-    detectHands(now);
-    updatePointers();
-    for (const per of people) brain(per, dt, now / 1000);
-    for (let i = 0; i < SUBSTEPS; i++) step(dt / SUBSTEPS);
-    reactions(now);
-    countBasket();
-    updateParts(dt);
-    draw(now);
-  } catch (e) {
-    if (!frame.failed) { frame.failed = true; console.error(e); window.__manoError = String(e.stack || e); }
-  }
-  requestAnimationFrame(frame);
-}
-
-resize();
-// acceso para pruebas, sólo en local
-if (location.hostname === "localhost") window.__mano = { get people() { return people; }, IDX };
-addEventListener("keydown", e => { if (e.key === "r" || e.key === "R") spawn(); });
-requestAnimationFrame(frame);
-</script>
+  <footer>Todo pasa en tu navegador: la imagen de la cámara no sale de tu dispositivo.</footer>
+</main>
 </body>
 </html>

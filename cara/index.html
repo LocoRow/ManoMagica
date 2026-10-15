@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cara Loca</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;800&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  /* Pantalla completa: la cara deformada en WebGL, encima un canvas con las manos, y el HUD de cristal */
+  :root {
+    --ink: #f4f1ff;
+    --dim: rgba(244, 241, 255, .65);
+    --glass: rgba(14, 12, 20, .5);
+    --accent: #ff9ec4;
+    --grab: #ffcf4a;
+    --display: "Bricolage Grotesque", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; background: #0b0a10; color: var(--ink); overflow: hidden; font-family: var(--display); }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  #cam { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #hud {
+    position: fixed; top: 16px; left: 16px; right: 16px;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none;
+  }
+  #fx { position: fixed; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom, 0px)); display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; pointer-events: none; }
+  .pill, .btn {
+    background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,.1); border-radius: 999px;
+    padding: 8px 14px; font: 400 12.5px/1.3 var(--mono); color: var(--dim); text-decoration: none;
+  }
+  .pill b { color: var(--ink); font-weight: 400; }
+  .btn { pointer-events: auto; color: var(--ink); cursor: pointer; }
+  .btn[aria-pressed="true"] { background: var(--accent); color: #1a0d14; border-color: transparent; }
+  .btn:focus-visible { outline: 2px solid var(--grab); outline-offset: 2px; }
+  #title { font: 800 20px/1 var(--display); color: var(--ink); letter-spacing: -.01em; text-shadow: 0 1px 12px rgba(0,0,0,.5); }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .35s; }
+  #intro {
+    position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
+    background: radial-gradient(ellipse at 50% 35%, #3a1f33 0%, #0b0a10 72%);
+  }
+  #intro .card { max-width: 30rem; text-align: center; display: grid; gap: 18px; }
+  #intro h1 { font: 800 clamp(40px, 8vw, 72px)/.95 var(--display); margin: 0; letter-spacing: -.03em; text-wrap: balance; }
+  #intro p { margin: 0; color: var(--dim); font-size: 17px; line-height: 1.5; }
+  #intro .gest { font: 400 14px/1.6 var(--mono); color: var(--dim); text-align: left; justify-self: center; }
+  #intro .gest b { color: var(--accent); font-weight: 400; }
+  .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .big {
+    font: 800 18px/1 var(--display); padding: 16px 24px; border: 0; border-radius: 14px; cursor: pointer;
+    background: var(--accent); color: #1a0d14;
+  }
+  .big.alt { background: rgba(255,255,255,.1); color: var(--ink); }
+  .big:focus-visible { outline: 3px solid var(--grab); outline-offset: 3px; }
+  #err { color: #ff8a8a; font: 400 13px/1.5 var(--mono); }
+  .back { color: var(--dim); font: 400 13px/1.4 var(--mono); }
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline muted></video>
+<canvas id="gl"></canvas>
+<canvas id="ov"></canvas>
+<div id="flash"></div>
+
+<div id="hud" hidden>
+  <span id="title">Cara Loca</span>
+  <span class="pill" id="status">Cargando modelos…</span>
+  <button class="btn" id="mode" type="button" title="Plastilina: se queda como la dejas. Gelatina: vuelve a su sitio rebotando">Plastilina</button>
+  <button class="btn" id="reset" type="button">Reiniciar</button>
+  <button class="btn" id="snap" type="button">Foto</button>
+  <a class="btn" href="../">Modos</a>
+</div>
+
+<div id="fx" hidden>
+  <button class="btn" type="button" data-fx="nariz" aria-pressed="false">Narizón</button>
+  <button class="btn" type="button" data-fx="ojos" aria-pressed="false">Ojos saltones</button>
+  <button class="btn" type="button" data-fx="boca" aria-pressed="false">Bocaza</button>
+  <button class="btn" type="button" data-fx="cabeza" aria-pressed="false">Cabezón</button>
+  <button class="btn" type="button" data-fx="mini" aria-pressed="false">Carita mini</button>
+</div>
+
+<div id="intro">
+  <div class="card">
+    <h1>Moldea tu cara con las manos</h1>
+    <p>Haz la pinza sobre tu cara y tira: se estira como si fuera plastilina, y la deformación sigue a tu cara aunque te muevas. Todo pasa en tu navegador; la imagen no sale de tu dispositivo.</p>
+    <div class="gest">
+      <b>pinza</b> sobre la cara + arrastrar → estirar<br>
+      <b>abrir los dedos</b> → soltar<br>
+      <b>gelatina</b> → al soltar, vuelve rebotando<br>
+      sin cámara: usa una foto y el ratón
+    </div>
+    <div class="actions">
+      <button class="big" id="go" type="button">Encender cámara</button>
+      <button class="big alt" id="usePhoto" type="button">Usar una foto</button>
+      <input id="file" type="file" accept="image/*" hidden>
+    </div>
+    <div id="err"></div>
+    <a class="back" href="../">← Elegir otro modo</a>
+  </div>
+</div>
+
+<script type="module">
+import { HandLandmarker, FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const video = document.getElementById("cam");
+const glc = document.getElementById("gl");
+const ov = document.getElementById("ov");
+const octx = ov.getContext("2d");
+const statusEl = document.getElementById("status");
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// ---------- WebGL: la imagen se pinta deformada en un shader ----------
+const MAX_DRAG = 24, MAX_BULGE = 8;
+const gl = glc.getContext("webgl", { preserveDrawingBuffer: true, antialias: false });
+const VS = `attribute vec2 a; uniform vec2 uRes; varying vec2 vPos;
+void main(){ vPos = vec2((a.x + 1.0) * 0.5 * uRes.x, (1.0 - a.y) * 0.5 * uRes.y); gl_Position = vec4(a, 0.0, 1.0); }`;
+// Para cada píxel de pantalla calculamos de qué punto de la imagen original viene (deformación inversa)
+const FS = `precision highp float;
+uniform sampler2D uTex; uniform vec4 uMap; uniform float uMirror; uniform float uHasTex;
+uniform int uND; uniform vec4 uDrag[${MAX_DRAG}]; uniform float uDragR[${MAX_DRAG}];
+uniform int uNB; uniform vec4 uBulge[${MAX_BULGE}];
+varying vec2 vPos;
+void main(){
+  vec2 p = vPos;
+  for (int i = ${MAX_DRAG - 1}; i >= 0; i--) {
+    if (i >= uND) continue;
+    vec4 d = uDrag[i]; float r = uDragR[i];
+    vec2 q = p - d.xy; float w = exp(-dot(q, q) / (r * r));
+    p -= d.zw * w;
+  }
+  for (int i = 0; i < ${MAX_BULGE}; i++) {
+    if (i >= uNB) break;
+    vec4 b = uBulge[i]; vec2 q = p - b.xy; float w = exp(-dot(q, q) / (b.z * b.z));
+    p = b.xy + q * (1.0 - b.w * w);
+  }
+  vec2 uv = (p - uMap.xy) / uMap.zw;
+  if (uMirror > 0.5) uv.x = 1.0 - uv.x;
+  if (uHasTex < 0.5 || uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { gl_FragColor = vec4(0.043, 0.039, 0.063, 1.0); return; }
+  gl_FragColor = vec4(texture2D(uTex, uv).rgb, 1.0);
+}`;
+function shader(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog); gl.useProgram(prog);
+const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+const aLoc = gl.getAttribLocation(prog, "a"); gl.enableVertexAttribArray(aLoc); gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
+const U = n => gl.getUniformLocation(prog, n);
+const u = { res: U("uRes"), map: U("uMap"), mirror: U("uMirror"), hasTex: U("uHasTex"), nd: U("uND"), drag: U("uDrag"), dragR: U("uDragR"), nb: U("uNB"), bulge: U("uBulge") };
+const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+// ---------- Fuente: cámara (en espejo, recortada a pantalla) o foto (entera) ----------
+let src = null, srcW = 0, srcH = 0, isPhoto = false, texReady = false;
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  for (const c of [glc, ov]) { c.width = W * DPR; c.height = H * DPR; }
+  octx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  gl.viewport(0, 0, glc.width, glc.height);
+}
+addEventListener("resize", resize);
+function mapping() {
+  const s = isPhoto ? Math.min(W / srcW, H / srcH) : Math.max(W / srcW, H / srcH);
+  return { s, ox: (W - srcW * s) / 2, oy: (H - srcH * s) / 2 };
+}
+function toScreen(lm) {
+  const m = mapping(), x = isPhoto ? lm.x : 1 - lm.x;
+  return { x: x * srcW * m.s + m.ox, y: lm.y * srcH * m.s + m.oy };
+}
+
+// ---------- Cara: un sistema de coordenadas propio que se mueve con ella ----------
+let faceRaw = null, face = null, faceSeen = 0;
+function faceFrame() {
+  if (!faceRaw || !srcW) return null;
+  const P = faceRaw.map(toScreen);
+  const a = P[234], b = P[454];
+  const c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const dx = b.x - a.x, dy = b.y - a.y, s = Math.hypot(dx, dy) || 1;
+  const ux = { x: dx / s, y: dy / s }, uy = { x: -ux.y, y: ux.x };
+  return { c, ux, uy, s, P };
+}
+const toLocal = (f, p) => { const qx = p.x - f.c.x, qy = p.y - f.c.y; return { x: (qx * f.ux.x + qy * f.ux.y) / f.s, y: (qx * f.uy.x + qy * f.uy.y) / f.s }; };
+const toWorld = (f, l) => ({ x: f.c.x + (f.ux.x * l.x + f.uy.x * l.y) * f.s, y: f.c.y + (f.ux.y * l.x + f.uy.y * l.y) * f.s });
+
+// Tirones: punto agarrado (A) y adónde se ha llevado (B), en coordenadas de la cara
+let strokes = [];
+let jelly = false;
+// Efectos ya hechos: lupas (positivas) o encogimientos (negativos) sobre puntos de la cara
+const FX = {
+  nariz: [{ lm: [1], r: 0.26, k: 0.55 }],
+  ojos: [{ lm: [468], r: 0.13, k: 0.6 }, { lm: [473], r: 0.13, k: 0.6 }],
+  boca: [{ lm: [13, 14], r: 0.26, k: 0.5 }],
+  cabeza: [{ lm: [168], r: 0.75, k: 0.32 }],
+  mini: [{ lm: [168], r: 0.7, k: -0.45 }],
+};
+const fxOn = new Set();
+
+// ---------- Manos (cámara) y ratón ----------
+const pointers = new Map();
+function pointer(id) {
+  if (!pointers.has(id)) pointers.set(id, { x: 0, y: 0, pinch: false, amt: 0, stroke: null, seen: 0, landmarks: null, init: false });
+  return pointers.get(id);
+}
+
+let handLm = null, faceLm = null, lastVideoTime = -1, fileset = null;
+async function loadModels() {
+  fileset = fileset || await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  if (!faceLm) faceLm = await FaceLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", delegate: "GPU" },
+    runningMode: "VIDEO", numFaces: 1,
+  });
+  if (!isPhoto && !handLm) handLm = await HandLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
+    runningMode: "VIDEO", numHands: 2,
+  });
+}
+
+function showApp() {
+  document.getElementById("intro").hidden = true;
+  document.getElementById("hud").hidden = false;
+  document.getElementById("fx").hidden = false;
+}
+
+async function startCamera() {
+  const err = document.getElementById("err");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: "user" } });
+    video.srcObject = stream;
+    await video.play();
+  } catch (e) {
+    err.textContent = "No se pudo abrir la cámara (" + e.name + "). Prueba con una foto.";
+    return;
+  }
+  isPhoto = false; src = video; srcW = video.videoWidth; srcH = video.videoHeight;
+  showApp();
+  try { await loadModels(); statusEl.textContent = "Mira a la cámara"; }
+  catch (e) { statusEl.textContent = "No cargaron los modelos"; console.error(e); }
+}
+
+async function usePhotoUrl(url) {
+  const img = new Image(); img.crossOrigin = "anonymous";
+  await new Promise((ok, ko) => { img.onload = ok; img.onerror = ko; img.src = url; });
+  if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
+  isPhoto = true; src = img; srcW = img.naturalWidth; srcH = img.naturalHeight;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img); texReady = true;
+  strokes = []; faceRaw = null;
+  showApp();
+  statusEl.textContent = "Buscando la cara…";
+  try {
+    await loadModels();
+    const r = faceLm.detectForVideo(img, performance.now());
+    if (r.faceLandmarks?.[0]) { faceRaw = r.faceLandmarks[0]; faceSeen = performance.now(); statusEl.textContent = "Arrastra la cara con el ratón"; }
+    else statusEl.textContent = "No encuentro ninguna cara en la foto";
+  } catch (e) { statusEl.textContent = "No cargaron los modelos"; console.error(e); }
+}
+
+document.getElementById("go").addEventListener("click", startCamera);
+document.getElementById("usePhoto").addEventListener("click", () => document.getElementById("file").click());
+document.getElementById("file").addEventListener("change", e => {
+  const f = e.target.files?.[0]; if (!f) return;
+  usePhotoUrl(URL.createObjectURL(f)).catch(() => { document.getElementById("err").textContent = "No se pudo abrir esa imagen."; });
+});
+document.getElementById("mode").addEventListener("click", e => {
+  jelly = !jelly; e.currentTarget.textContent = jelly ? "Gelatina" : "Plastilina";
+});
+document.getElementById("reset").addEventListener("click", () => {
+  strokes = []; fxOn.clear();
+  document.querySelectorAll("[data-fx]").forEach(b => b.setAttribute("aria-pressed", "false"));
+});
+document.querySelectorAll("[data-fx]").forEach(b => b.addEventListener("click", () => {
+  const k = b.dataset.fx, on = !fxOn.has(k);
+  // cabezón y carita mini se excluyen
+  if (on && (k === "cabeza" || k === "mini")) { const other = k === "cabeza" ? "mini" : "cabeza"; fxOn.delete(other); document.querySelector(`[data-fx="${other}"]`).setAttribute("aria-pressed", "false"); }
+  on ? fxOn.add(k) : fxOn.delete(k);
+  b.setAttribute("aria-pressed", String(on));
+}));
+document.getElementById("snap").addEventListener("click", () => {
+  const fl = document.getElementById("flash"); fl.style.transition = "none"; fl.style.opacity = "0.85";
+  requestAnimationFrame(() => { fl.style.transition = ""; fl.style.opacity = "0"; });
+  glc.toBlob(b => {
+    if (!b) return;
+    const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = "cara-loca.png";
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }, "image/png");
+});
+
+function detect(now) {
+  if (isPhoto || !src || video.readyState < 2 || video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+  srcW = video.videoWidth; srcH = video.videoHeight;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video); texReady = true;
+  if (faceLm) {
+    const r = faceLm.detectForVideo(video, now);
+    if (r.faceLandmarks?.[0]) { faceRaw = r.faceLandmarks[0]; faceSeen = now; }
+  }
+  if (handLm) {
+    const res = handLm.detectForVideo(video, now + 0.1);
+    const seen = new Set();
+    (res.landmarks || []).forEach((lms, i) => {
+      const id = "hand-" + (res.handednesses?.[i]?.[0]?.categoryName || i);
+      seen.add(id);
+      const p = pointer(id), pts = lms.map(toScreen);
+      p.landmarks = pts;
+      const size = Math.hypot(pts[0].x - pts[9].x, pts[0].y - pts[9].y) || 1;
+      const d = Math.hypot(pts[4].x - pts[8].x, pts[4].y - pts[8].y) / size;
+      p.pinch = p.pinch ? d < 0.5 : d < 0.32;
+      p.amt = clamp((0.75 - d) / 0.43, 0, 1);
+      const tx = (pts[4].x + pts[8].x) / 2, ty = (pts[4].y + pts[8].y) / 2;
+      if (!p.init) { p.x = tx; p.y = ty; p.init = true; }
+      p.x += (tx - p.x) * 0.55; p.y += (ty - p.y) * 0.55;
+      p.seen = now;
+    });
+    for (const [id, p] of pointers) if (id.startsWith("hand-") && !seen.has(id) && now - p.seen > 250) { letGo(p); pointers.delete(id); }
+  }
+  const nh = [...pointers.keys()].filter(k => k.startsWith("hand-")).length;
+  statusEl.innerHTML = now - faceSeen > 500 ? "Mira a la cámara" : nh ? `Cara y <b>${nh}</b> mano${nh > 1 ? "s" : ""}` : "Enseña la mano";
+}
+
+// Ratón (y dedo, sólo con foto: con cámara se usa la mano)
+const allowed = e => e.pointerType !== "touch" || isPhoto;
+glc.parentElement.addEventListener("pointerdown", e => {
+  if (!allowed(e) || e.target.closest("button, a, input")) return;
+  const p = pointer("mouse"); p.x = e.clientX; p.y = e.clientY; p.init = true; p.pinch = true; p.amt = 1;
+});
+addEventListener("pointermove", e => { if (!allowed(e)) return; const p = pointer("mouse"); p.x = e.clientX; p.y = e.clientY; p.init = true; });
+addEventListener("pointerup", e => { if (!allowed(e)) return; const p = pointers.get("mouse"); if (p) { p.pinch = false; p.amt = 0; } });
+
+function letGo(p) { if (p.stroke) { p.stroke.held = false; p.stroke = null; } }
+
+function updatePointers() {
+  for (const p of pointers.values()) {
+    if (p.pinch && !p.stroke && face && Math.hypot(p.x - face.c.x, p.y - face.c.y) < face.s * 1.25) {
+      const A = toLocal(face, p);
+      p.stroke = { A, B: { ...A }, v: { x: 0, y: 0 }, held: true };
+      strokes.push(p.stroke);
+      if (strokes.length > MAX_DRAG) strokes.shift();
+    } else if (p.pinch && p.stroke && face) {
+      p.stroke.B = toLocal(face, p);
+    } else if (!p.pinch && p.stroke) letGo(p);
+  }
+}
+
+// Gelatina: lo que se suelta vuelve a su sitio con un muelle amortiguado
+function relax(dt) {
+  if (!jelly) return;
+  for (const s of strokes) {
+    if (s.held) continue;
+    s.v.x += ((s.A.x - s.B.x) * 90 - s.v.x * 5) * dt;
+    s.v.y += ((s.A.y - s.B.y) * 90 - s.v.y * 5) * dt;
+    s.B.x += s.v.x * dt; s.B.y += s.v.y * dt;
+  }
+  strokes = strokes.filter(s => s.held || Math.hypot(s.B.x - s.A.x, s.B.y - s.A.y) > 0.002 || Math.hypot(s.v.x, s.v.y) > 0.02);
+}
+
+const dragArr = new Float32Array(MAX_DRAG * 4), dragR = new Float32Array(MAX_DRAG), bulgeArr = new Float32Array(MAX_BULGE * 4);
+function render() {
+  gl.uniform2f(u.res, W, H);
+  gl.uniform1f(u.hasTex, texReady ? 1 : 0);
+  gl.uniform1f(u.mirror, isPhoto ? 0 : 1);
+  if (srcW) { const m = mapping(); gl.uniform4f(u.map, m.ox, m.oy, srcW * m.s, srcH * m.s); }
+  let nd = 0, nb = 0;
+  if (face) {
+    for (const s of strokes) {
+      const A = toWorld(face, s.A), B = toWorld(face, s.B);
+      const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy);
+      dragArr.set([B.x, B.y, dx, dy], nd * 4);
+      // con tirones largos el radio crece para que la piel se estire en vez de romperse
+      dragR[nd] = Math.max(face.s * 0.22, len * 1.15);
+      nd++;
+    }
+    for (const k of fxOn) for (const b of FX[k]) {
+      if (nb >= MAX_BULGE) break;
+      const pts = b.lm.map(i => face.P[i]).filter(Boolean);
+      if (!pts.length) continue;
+      const x = pts.reduce((a, p) => a + p.x, 0) / pts.length, y = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+      bulgeArr.set([x, y, face.s * b.r, b.k], nb * 4); nb++;
+    }
+  }
+  gl.uniform1i(u.nd, nd); gl.uniform4fv(u.drag, dragArr); gl.uniform1fv(u.dragR, dragR);
+  gl.uniform1i(u.nb, nb); gl.uniform4fv(u.bulge, bulgeArr);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
+function overlay() {
+  octx.clearRect(0, 0, W, H);
+  for (const [id, p] of pointers) {
+    if (p.landmarks) {
+      octx.strokeStyle = "rgba(255,158,196,.4)"; octx.lineWidth = 2; octx.lineCap = "round";
+      octx.beginPath();
+      for (const [a, c] of BONES) { octx.moveTo(p.landmarks[a].x, p.landmarks[a].y); octx.lineTo(p.landmarks[c].x, p.landmarks[c].y); }
+      octx.stroke();
+    }
+    if (!p.init || (id === "mouse" && !p.pinch)) continue;
+    octx.lineWidth = 3;
+    octx.strokeStyle = "rgba(244,241,255,.35)";
+    octx.beginPath(); octx.arc(p.x, p.y, 16, 0, Math.PI * 2); octx.stroke();
+    octx.strokeStyle = p.stroke ? "#ffcf4a" : "rgba(244,241,255,.95)";
+    octx.beginPath(); octx.arc(p.x, p.y, 16, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.amt); octx.stroke();
+    if (p.stroke) { octx.fillStyle = "#ffcf4a"; octx.beginPath(); octx.arc(p.x, p.y, 4.5, 0, Math.PI * 2); octx.fill(); }
+  }
+}
+
+let last = performance.now();
+function frame(now) {
+  tick(now);
+  requestAnimationFrame(frame);
+}
+function tick(now) {
+  const dt = Math.min(0.033, (now - last) / 1000) || 0.016; last = now;
+  try {
+    detect(now);
+    face = faceFrame();
+    updatePointers();
+    relax(dt);
+    render();
+    overlay();
+  } catch (e) {
+    if (!tick.failed) { tick.failed = true; console.error(e); window.__caraError = String(e.stack || e); }
+  }
+}
+
+resize();
+if (location.hostname === "localhost") window.__cara = { usePhotoUrl, tick: () => tick(performance.now()), get strokes() { return strokes; }, get face() { return face; } };
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
