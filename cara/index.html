@@ -68,6 +68,7 @@
   <span id="title">Cara Loca</span>
   <span class="pill" id="status">Cargando modelos…</span>
   <button class="btn" id="mode" type="button" title="Plastilina: se queda como la dejas. Gelatina: vuelve a su sitio rebotando">Plastilina</button>
+  <button class="btn" id="iso" type="button" aria-pressed="true" title="Deformar sólo la cara o toda la imagen">Sólo la cara</button>
   <button class="btn" id="reset" type="button">Reiniciar</button>
   <button class="btn" id="snap" type="button">Foto</button>
   <a class="btn" href="../">Modos</a>
@@ -119,9 +120,17 @@ void main(){ vPos = vec2((a.x + 1.0) * 0.5 * uRes.x, (1.0 - a.y) * 0.5 * uRes.y)
 // Para cada píxel de pantalla calculamos de qué punto de la imagen original viene (deformación inversa)
 const FS = `precision highp float;
 uniform sampler2D uTex; uniform vec4 uMap; uniform float uMirror; uniform float uHasTex;
+uniform sampler2D uMask; uniform float uIso; uniform vec2 uRes;
 uniform int uND; uniform vec4 uDrag[${MAX_DRAG}]; uniform float uDragR[${MAX_DRAG}];
 uniform int uNB; uniform vec4 uBulge[${MAX_BULGE}];
 varying vec2 vPos;
+const vec3 BG = vec3(0.043, 0.039, 0.063);
+vec3 pick(vec2 p) {
+  vec2 uv = (p - uMap.xy) / uMap.zw;
+  if (uMirror > 0.5) uv.x = 1.0 - uv.x;
+  if (uHasTex < 0.5 || uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return BG;
+  return texture2D(uTex, uv).rgb;
+}
 void main(){
   vec2 p = vPos;
   for (int i = ${MAX_DRAG - 1}; i >= 0; i--) {
@@ -135,10 +144,10 @@ void main(){
     vec4 b = uBulge[i]; vec2 q = p - b.xy; float w = exp(-dot(q, q) / (b.z * b.z));
     p = b.xy + q * (1.0 - b.w * w);
   }
-  vec2 uv = (p - uMap.xy) / uMap.zw;
-  if (uMirror > 0.5) uv.x = 1.0 - uv.x;
-  if (uHasTex < 0.5 || uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { gl_FragColor = vec4(0.043, 0.039, 0.063, 1.0); return; }
-  gl_FragColor = vec4(texture2D(uTex, uv).rgb, 1.0);
+  // Sólo la cara: la máscara se lee en el punto de origen, así viaja con la piel estirada;
+  // fuera de ella se ve la imagen sin tocar
+  float m = uIso > 0.5 ? texture2D(uMask, clamp(p / uRes, 0.0, 1.0)).r : 1.0;
+  gl_FragColor = vec4(mix(pick(vPos), pick(p), m), 1.0);
 }`;
 function shader(type, src) {
   const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
@@ -153,12 +162,25 @@ const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
 const aLoc = gl.getAttribLocation(prog, "a"); gl.enableVertexAttribArray(aLoc); gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
 const U = n => gl.getUniformLocation(prog, n);
-const u = { res: U("uRes"), map: U("uMap"), mirror: U("uMirror"), hasTex: U("uHasTex"), nd: U("uND"), drag: U("uDrag"), dragR: U("uDragR"), nb: U("uNB"), bulge: U("uBulge") };
-const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+const u = { res: U("uRes"), map: U("uMap"), mirror: U("uMirror"), hasTex: U("uHasTex"), nd: U("uND"), drag: U("uDrag"), dragR: U("uDragR"), nb: U("uNB"), bulge: U("uBulge"), mask: U("uMask"), iso: U("uIso") };
+function makeTex(unit) {
+  const t = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  return t;
+}
+const tex = makeTex(0), maskTex = makeTex(1);
+gl.uniform1i(U("uTex"), 0); gl.uniform1i(u.mask, 1);
+function upload(t, unit, img) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img); }
+
+// Máscara de la cara: el óvalo de MediaPipe, algo ampliado y con el borde difuminado, a media resolución
+const maskCv = document.createElement("canvas"), mctx = maskCv.getContext("2d");
+const MASK_SCALE = 0.5;
+const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+let isolate = true;
 
 // ---------- Fuente: cámara (en espejo, recortada a pantalla) o foto (entera) ----------
 let src = null, srcW = 0, srcH = 0, isPhoto = false, texReady = false;
@@ -167,6 +189,7 @@ function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = innerWidth; H = innerHeight;
   for (const c of [glc, ov]) { c.width = W * DPR; c.height = H * DPR; }
+  maskCv.width = Math.max(1, Math.round(W * MASK_SCALE)); maskCv.height = Math.max(1, Math.round(H * MASK_SCALE));
   octx.setTransform(DPR, 0, 0, DPR, 0, 0);
   gl.viewport(0, 0, glc.width, glc.height);
 }
@@ -254,8 +277,7 @@ async function usePhotoUrl(url) {
   await new Promise((ok, ko) => { img.onload = ok; img.onerror = ko; img.src = url; });
   if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
   isPhoto = true; src = img; srcW = img.naturalWidth; srcH = img.naturalHeight;
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img); texReady = true;
+  upload(tex, 0, img); texReady = true;
   strokes = []; faceRaw = null;
   showApp();
   statusEl.textContent = "Buscando la cara…";
@@ -272,6 +294,9 @@ document.getElementById("usePhoto").addEventListener("click", () => document.get
 document.getElementById("file").addEventListener("change", e => {
   const f = e.target.files?.[0]; if (!f) return;
   usePhotoUrl(URL.createObjectURL(f)).catch(() => { document.getElementById("err").textContent = "No se pudo abrir esa imagen."; });
+});
+document.getElementById("iso").addEventListener("click", e => {
+  isolate = !isolate; e.currentTarget.setAttribute("aria-pressed", String(isolate));
 });
 document.getElementById("mode").addEventListener("click", e => {
   jelly = !jelly; e.currentTarget.textContent = jelly ? "Gelatina" : "Plastilina";
@@ -301,8 +326,7 @@ function detect(now) {
   if (isPhoto || !src || video.readyState < 2 || video.currentTime === lastVideoTime) return;
   lastVideoTime = video.currentTime;
   srcW = video.videoWidth; srcH = video.videoHeight;
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video); texReady = true;
+  upload(tex, 0, video); texReady = true;
   if (faceLm) {
     const r = faceLm.detectForVideo(video, now);
     if (r.faceLandmarks?.[0]) { faceRaw = r.faceLandmarks[0]; faceSeen = now; }
@@ -366,6 +390,26 @@ function relax(dt) {
   strokes = strokes.filter(s => s.held || Math.hypot(s.B.x - s.A.x, s.B.y - s.A.y) > 0.002 || Math.hypot(s.v.x, s.v.y) > 0.02);
 }
 
+// Óvalo de la cara ampliado (cubre frente y mandíbula) y difuminado con una sombra:
+// se dibuja fuera del lienzo y sólo cae dentro su sombra borrosa, que funciona en todos los navegadores
+function drawMask() {
+  mctx.setTransform(1, 0, 0, 1, 0, 0);
+  mctx.clearRect(0, 0, maskCv.width, maskCv.height);
+  if (!face) return;
+  const k = MASK_SCALE, off = maskCv.width + 100;
+  mctx.setTransform(k, 0, 0, k, -off, 0);
+  mctx.shadowColor = "#fff"; mctx.shadowBlur = face.s * k * 0.09; mctx.shadowOffsetX = off;
+  mctx.fillStyle = "#fff";
+  mctx.beginPath();
+  FACE_OVAL.forEach((i, n) => {
+    const p = face.P[i], up = toLocal(face, p).y < 0 ? 1.16 : 1.06;
+    const x = face.c.x + (p.x - face.c.x) * up, y = face.c.y + (p.y - face.c.y) * up;
+    n ? mctx.lineTo(x, y) : mctx.moveTo(x, y);
+  });
+  mctx.closePath(); mctx.fill();
+  mctx.shadowColor = "transparent";
+}
+
 const dragArr = new Float32Array(MAX_DRAG * 4), dragR = new Float32Array(MAX_DRAG), bulgeArr = new Float32Array(MAX_BULGE * 4);
 function render() {
   gl.uniform2f(u.res, W, H);
@@ -392,6 +436,8 @@ function render() {
   }
   gl.uniform1i(u.nd, nd); gl.uniform4fv(u.drag, dragArr); gl.uniform1fv(u.dragR, dragR);
   gl.uniform1i(u.nb, nb); gl.uniform4fv(u.bulge, bulgeArr);
+  gl.uniform1f(u.iso, isolate ? 1 : 0);
+  if (isolate) { drawMask(); upload(maskTex, 1, maskCv); }
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
