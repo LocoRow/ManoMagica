@@ -70,7 +70,7 @@
       <b>pinza</b> (pulgar + índice) → agarrar<br>
       <b>abrir los dedos</b> → soltar<br>
       <b>soltar en movimiento</b> → lanzar<br>
-      sin cámara también funciona con el ratón o el dedo
+      sin cámara también funciona con el ratón
     </div>
     <button id="go">Encender cámara</button>
     <div id="err"></div>
@@ -93,6 +93,8 @@ function resize() {
   cv.width = W * DPR; cv.height = H * DPR;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   layoutStage();
+  // Si se crearon sin tamaño (pestaña oculta al cargar) o el móvil gira, se vuelven a colocar
+  if (W && H && (!people.length || people[0].size < 20 || people.portrait !== portrait())) spawn();
 }
 addEventListener("resize", resize);
 
@@ -163,6 +165,7 @@ function spawn() {
   const n = portrait() ? 5 : 7;
   const size = portrait() ? Math.min(W * 0.3, H * 0.17) : Math.min(H * 0.24, 190);
   people = [];
+  people.portrait = portrait();
   const onShelfN = portrait() ? 2 : 3;
   for (let i = 0; i < n; i++) {
     const onShelf = i < onShelfN;
@@ -252,10 +255,11 @@ function detectHands(now) {
   statusEl.innerHTML = n ? `<b>${n}</b> mano${n > 1 ? "s" : ""} detectada${n > 1 ? "s" : ""}` : "Enseña la mano a la cámara";
 }
 
-// Ratón o dedo en pantalla como mano de repuesto
-cv.addEventListener("pointerdown", e => { const p = pointer("mouse"); p.x = e.clientX; p.y = e.clientY; p.init = true; p.pinch = true; });
-addEventListener("pointermove", e => { const p = pointer("mouse"); p.x = e.clientX; p.y = e.clientY; p.init = true; });
-addEventListener("pointerup", () => { const p = pointers.get("mouse"); if (p) p.pinch = false; });
+// Ratón como mano de repuesto. El dedo sobre la pantalla no cuenta: en el móvil sólo se coge con la cámara
+const notTouch = e => e.pointerType !== "touch";
+cv.addEventListener("pointerdown", e => { if (!notTouch(e)) return; const p = pointer("mouse"); p.x = e.clientX; p.y = e.clientY; p.init = true; p.pinch = true; });
+addEventListener("pointermove", e => { if (!notTouch(e)) return; const p = pointer("mouse"); p.x = e.clientX; p.y = e.clientY; p.init = true; });
+addEventListener("pointerup", e => { if (!notTouch(e)) return; const p = pointers.get("mouse"); if (p) p.pinch = false; });
 
 function release(p) {
   if (!p.held) return;
@@ -497,7 +501,6 @@ function frame(now) {
 }
 
 resize();
-spawn();
 addEventListener("keydown", e => { if (e.key === "r" || e.key === "R") spawn(); });
 requestAnimationFrame(frame);
 </script>
