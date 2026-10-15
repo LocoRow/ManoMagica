@@ -21,6 +21,7 @@
   [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; background: #0b0816; color: var(--ink); overflow: hidden; font-family: var(--display); }
   video, canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+  canvas { touch-action: none; }
   video { object-fit: cover; transform: scaleX(-1); filter: saturate(.85) brightness(.8); }
   #hud {
     position: fixed; top: 16px; left: 16px; right: 16px;
@@ -101,22 +102,29 @@ const shelf = { x: 0, y: 0, w: 0 };
 const ITEMS = ["🍎", "⚽", "🎲", "⭐", "🧸", "🍩", "🪀", "📦", "🍉", "🎈"];
 let objects = [];
 
+// En vertical (móvil) la estantería ocupa casi todo el ancho y la cesta se pone a la derecha, más pequeña
+const portrait = () => W < H;
+function radius() { return portrait() ? Math.max(20, Math.min(30, W / 15)) : Math.max(28, Math.min(46, W / 30)); }
+
 function layoutStage() {
-  floorY = H * 0.86;
-  const bw = Math.min(220, W * 0.28);
-  basket = { x: W - bw - Math.max(24, W * 0.05), y: floorY - bw * 0.62, w: bw, h: bw * 0.62 };
-  shelf.w = Math.min(380, W * 0.4); shelf.x = Math.max(24, W * 0.05); shelf.y = H * 0.42;
+  floorY = H * (portrait() ? 0.9 : 0.86);
+  const bw = portrait() ? W * 0.34 : Math.min(220, W * 0.28);
+  basket = { x: W - bw - 16, y: floorY - bw * 0.62, w: bw, h: bw * 0.62 };
+  shelf.x = portrait() ? 16 : Math.max(24, W * 0.05);
+  shelf.w = portrait() ? W - 32 : Math.min(380, W * 0.4);
+  shelf.y = H * (portrait() ? 0.38 : 0.42);
 }
 
 function spawn() {
-  const r = Math.max(28, Math.min(46, W / 30));
+  const r = radius();
+  // los 5 de abajo se reparten por el suelo libre, a la izquierda de la cesta
+  const floorSpan = basket.x - 16 - 2 * r;
   objects = ITEMS.map((e, i) => ({
     emoji: e, r,
-    x: shelf.x + r + (i % 5) * (shelf.w - 2 * r) / 4,
+    x: i < 5 ? shelf.x + r + (i % 5) * (shelf.w - 2 * r) / 4 : 16 + r + (i - 5) * floorSpan / 4,
     y: i < 5 ? shelf.y - r : floorY - r,
     vx: 0, vy: 0, held: null, wobble: Math.random() * 6, inBasket: false,
   }));
-  objects.slice(5).forEach((o, i) => { o.x = W * 0.38 + i * r * 2.3; });
 }
 
 // ---------- Manos (cámara + MediaPipe) y ratón ----------
