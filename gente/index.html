@@ -415,7 +415,7 @@ function detectFaceFrame(now) {
   const w = Math.hypot(cl.x - cr.x, cl.y - cr.y) || 1;
   const ratio = Math.hypot(up.x - lo.x, up.y - lo.y) / w;   // 0 cerrada, ~0.6+ muy abierta
   const open = (mouth && mouth.open) ? ratio > 0.22 : ratio > 0.4;   // histéresis
-  mouth = { x: (up.x + lo.x) / 2, y: (up.y + lo.y) / 2, r: Math.max(w * 0.6, 24), open, amt: clamp((ratio - 0.1) / 0.5, 0, 1) };
+  mouth = { x: (up.x + lo.x) / 2, y: (up.y + lo.y) / 2, r: Math.max(w * 0.6, 24), open, amt: clamp((ratio - 0.1) / 0.5, 0, 1), cl, cr, up, lo };
   // datos para el overlay de titán
   const oL = toScreen(lms[234]), oR = toScreen(lms[454]), top = toScreen(lms[10]), chin = toScreen(lms[152]);
   face = {
@@ -423,6 +423,7 @@ function detectFaceFrame(now) {
     fw: Math.hypot(oL.x - oR.x, oL.y - oR.y) || 1,
     eL: mid(toScreen(lms[33]), toScreen(lms[133])),
     eR: mid(toScreen(lms[362]), toScreen(lms[263])),
+    nose: toScreen(lms[1]), brow: toScreen(lms[168]),
     top, chin, cx: (oL.x + oR.x) / 2, cy: (top.y + chin.y) / 2,
   };
 }
@@ -461,11 +462,19 @@ function chewUpdate(dt, now) {
       biteInHalf(per);
     }
   }
+  // el trozo cortado gotea sangre mientras cae
+  for (const per of people) {
+    if (!per.bitten) continue;
+    let tp = null;
+    for (const pt of per.pts) if (!pt.dead && (!tp || pt.y < tp.y)) tp = pt;
+    if (tp && Math.random() < 0.55) bloodDrip(tp.x, tp.y, per.size);
+  }
   mouthWasOpen = !!(mouth && mouth.open);
 }
 
 function swallowWhole(per) {
   for (const pt of per.pts) if (pt.held) { pt.held.held = null; pt.held = null; }
+  if (mouth) gore(mouth.x, mouth.y, per.size * 0.7, false);
   removePerson(per);
   eaten++; if (eatenEl) eatenEl.textContent = eaten;
   chomp(1);
@@ -486,7 +495,7 @@ function biteInHalf(per) {
     per.bitten = true; per.cut = cut; per.k = 0; per.state = "ragdoll"; per.dizzy = 2.5;
     for (const pt of per.pts) if (!pt.dead) { pt.px = pt.x - (Math.random() * 3 - 1.5); pt.py = pt.y - 3; }  // impulso de caída
     eaten++; if (eatenEl) eatenEl.textContent = eaten;
-    chomp(1); say(per, "ay"); gore(cut.x, cut.y, per.size);
+    chomp(1); say(per, "ay"); gore(cut.x, cut.y, per.size, true);
     setTimeout(() => removePerson(per), 4000);
   } else if (anyIn) {
     swallowWhole(per);                 // estaba casi todo dentro
@@ -506,12 +515,19 @@ function spawnOne() {
   const size = portrait() ? Math.min(H * 0.16, W * 0.34) : Math.min(H * 0.23, 190);
   people.push(makePerson(rand(16, Math.max(48, W - 16)), floorY, size));
 }
-// Salpicadura roja del mordisco (reutiliza el sistema de partículas con color)
-function gore(x, y, s) {
-  for (let i = 0; i < 16; i++) {
-    const a = rand(Math.PI), sp = rand(0.4, 1.3) * s;
-    parts.push({ x, y, vx: Math.cos(a) * sp * (Math.random() < 0.5 ? -1 : 1), vy: -Math.abs(Math.sin(a)) * sp, life: 0, max: rand(0.5, 1), r: s * rand(0.02, 0.05), col: [172, 22, 26] });
+// Chorro de sangre del mordisco: gotas con gravedad, por encima de todo, + un charco/salpicón
+function gore(x, y, s, big) {
+  const n = big ? 36 : 16;
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + rand(-1, 1) * 1.15, sp = rand(0.5, 2.3) * s;   // hacia arriba y a los lados
+    parts.push({ x: x + rand(-1, 1) * s * 0.08, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: rand(0.6, 1.3), r: s * rand(0.015, 0.05), col: [150 + (rand(40) | 0), 12, 16], grav: true, top: true });
   }
+  // salpicón suave inicial
+  parts.push({ x, y, vx: 0, vy: 0, life: 0, max: 1, r: s * 0.13, col: [120, 10, 12], top: true });
+}
+// Goteo continuo del borde cortado del trozo que cae
+function bloodDrip(x, y, s) {
+  parts.push({ x: x + rand(-1, 1) * s * 0.05, y, vx: rand(-0.3, 0.3) * s, vy: rand(0, 0.4) * s, life: 0, max: rand(0.5, 1), r: s * rand(0.015, 0.03), col: [150, 12, 16], grav: true, top: true });
 }
 // Bocado: un crujido de ruido filtrado + un "gulp" que baja de tono (v = intensidad 0..1)
 function chomp(v = 1) {
@@ -791,19 +807,26 @@ function dust(x, y, n, s) {
 function updateParts(dt) {
   for (let i = parts.length - 1; i >= 0; i--) {
     const q = parts[i];
-    q.life += dt; q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= 0.9; q.vy *= 0.9; q.r *= 1.02;
+    q.life += dt; q.x += q.vx * dt; q.y += q.vy * dt;
+    if (q.grav) { q.vy += 2200 * dt; q.vx *= 0.98; }   // sangre: cae
+    else { q.vx *= 0.9; q.vy *= 0.9; q.r *= 1.02; }     // polvo: se expande y frena
     if (q.life > q.max) parts.splice(i, 1);
   }
 }
-function drawParts() {
-  for (const q of parts) {
-    const [cr, cg, cb] = q.col || [205, 195, 180];
-    const a = (q.col ? 0.6 : 0.28) * (1 - q.life / q.max);
+function paintPart(q) {
+  const [cr, cg, cb] = q.col || [205, 195, 180];
+  const a = (q.col ? 0.85 : 0.28) * (1 - q.life / q.max);
+  if (q.grav) {   // gota de sangre: círculo sólido
+    ctx.fillStyle = `rgba(${cr},${cg},${cb},${a})`;
+    ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2); ctx.fill();
+  } else {
     const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, q.r);
     g.addColorStop(0, `rgba(${cr},${cg},${cb},${a})`); g.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2); ctx.fill();
   }
 }
+function drawParts() { for (const q of parts) if (!q.top) paintPart(q); }   // detrás (polvo)
+function drawPartsTop() { for (const q of parts) if (q.top) paintPart(q); }  // delante (sangre)
 
 // ---------- Dibujo de personas ----------
 // Segmento con volumen: cápsula de grosor variable + degradado de luz (luz arriba a la izquierda)
@@ -861,6 +884,15 @@ function drawLeg(per, side, dark) {
   const legColor = L.clothes === "dress" ? L.skin : L.bottom;
   seg(hi, kn, s * 0.047, s * 0.034, legColor, dark);
   seg(kn, ft, s * 0.033, s * 0.022, legColor, dark);
+  // correa en el muslo (look soldado)
+  if (L.clothes === "long") {
+    const m = lerp(hi, kn, 0.5), aT = Math.atan2(kn.y - hi.y, kn.x - hi.x) + Math.PI / 2;
+    ctx.strokeStyle = "rgba(48,34,20,0.85)"; ctx.lineWidth = Math.max(1.2, s * 0.013);
+    ctx.beginPath(); ctx.moveTo(m.x - Math.cos(aT) * s * 0.05, m.y - Math.sin(aT) * s * 0.05); ctx.lineTo(m.x + Math.cos(aT) * s * 0.05, m.y + Math.sin(aT) * s * 0.05); ctx.stroke();
+  }
+  // bota alta hasta media pantorrilla
+  const bootTop = lerp(ft, kn, 0.45);
+  seg(bootTop, ft, s * 0.03, s * 0.022, L.shoes, dark);
   // zapato orientado según la espinilla y hacia donde mira
   const shin = Math.atan2(ft.y - kn.y, ft.x - kn.x), ang = shin - per.dir * Math.PI / 2;
   ctx.save(); ctx.translate(ft.x, ft.y); ctx.rotate(ang);
@@ -1187,47 +1219,74 @@ function drawMouth() {
 // Overlay de titán sobre quien sale por la cámara (criatura grotesca propia, no un personaje concreto)
 function drawTitanFace() {
   if (!face) return;
-  const { ov, fw, eL, eR } = face;
+  const { ov, fw, eL, eR, nose } = face;
+  const ang = Math.atan2(eR.y - eL.y, eR.x - eL.x);   // inclinación de la cabeza
   ctx.save();
   // silueta de la cara
   ctx.beginPath();
   ctx.moveTo(ov[0].x, ov[0].y);
   for (let i = 1; i < ov.length; i++) ctx.lineTo(ov[i].x, ov[i].y);
   ctx.closePath();
-  // piel titánica semitransparente (deja ver algo de la cara real)
   ctx.save(); ctx.clip();
+  // piel base
   const g = ctx.createLinearGradient(0, face.top.y, 0, face.chin.y);
-  g.addColorStop(0, "rgba(216,178,152,0.72)"); g.addColorStop(1, "rgba(150,94,68,0.74)");
+  g.addColorStop(0, "rgba(222,184,158,0.82)"); g.addColorStop(1, "rgba(156,100,72,0.86)");
   ctx.fillStyle = g; ctx.fillRect(face.cx - fw, face.top.y - fw, fw * 2, fw * 2.6);
-  // vetas de músculo
-  ctx.strokeStyle = "rgba(92,50,36,0.33)"; ctx.lineWidth = Math.max(1, fw * 0.02);
-  for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(face.cx + k * fw * 0.22, face.top.y + fw * 0.2); ctx.lineTo(face.cx + k * fw * 0.3, face.chin.y); ctx.stroke(); }
+  // volumen: luz al centro, sombra a los bordes (da relieve en vez de plano)
+  const rg = ctx.createRadialGradient(face.cx - fw * 0.12, face.cy - fw * 0.1, fw * 0.15, face.cx, face.cy, fw * 1.15);
+  rg.addColorStop(0, "rgba(255,232,210,0.35)"); rg.addColorStop(0.62, "rgba(0,0,0,0)"); rg.addColorStop(1, "rgba(48,22,14,0.55)");
+  ctx.fillStyle = rg; ctx.fillRect(face.cx - fw, face.top.y - fw, fw * 2, fw * 2.6);
+  // manchas de piel
+  ctx.fillStyle = "rgba(120,70,50,0.18)";
+  for (const [mx, my, mr] of [[-0.35, 0.1, 0.18], [0.4, 0.25, 0.14], [0.05, 0.55, 0.2], [-0.5, -0.2, 0.12]]) {
+    ctx.beginPath(); ctx.ellipse(face.cx + mx * fw, face.cy + my * fw, mr * fw, mr * fw * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  // sombra de la nariz y aletas
+  ctx.fillStyle = "rgba(60,30,20,0.3)";
+  ctx.beginPath(); ctx.ellipse(nose.x - fw * 0.05, nose.y, fw * 0.045, fw * 0.03, 0, 0, Math.PI * 2);
+  ctx.ellipse(nose.x + fw * 0.05, nose.y, fw * 0.045, fw * 0.03, 0, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
-  // borde
-  ctx.lineWidth = Math.max(1.5, fw * 0.03); ctx.strokeStyle = "rgba(70,40,28,0.5)"; ctx.stroke();
-  // ojos pequeños y hundidos + ojeras
-  ctx.fillStyle = "rgba(18,9,7,0.88)";
-  for (const e of [eL, eR]) { ctx.beginPath(); ctx.ellipse(e.x, e.y, fw * 0.05, fw * 0.035, 0, 0, Math.PI * 2); ctx.fill(); }
-  ctx.strokeStyle = "rgba(60,30,25,0.5)"; ctx.lineWidth = Math.max(1, fw * 0.015);
-  for (const e of [eL, eR]) { ctx.beginPath(); ctx.arc(e.x, e.y + fw * 0.03, fw * 0.08, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke(); }
-  // fauces enormes con dientes, que se abren con tu boca real
-  if (mouth) drawTitanMaw(mouth, fw);
+  // borde oscuro de la cara
+  ctx.lineWidth = Math.max(1.5, fw * 0.025); ctx.strokeStyle = "rgba(70,40,28,0.55)"; ctx.stroke();
+  // ojos pequeños, hundidos, con ceja/sombra superior y brillo
+  for (const e of [eL, eR]) {
+    ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(ang);
+    ctx.fillStyle = "rgba(40,20,14,0.5)"; ctx.beginPath(); ctx.ellipse(0, -fw * 0.02, fw * 0.1, fw * 0.07, 0, 0, Math.PI * 2); ctx.fill();  // cuenca
+    ctx.fillStyle = "rgba(14,8,6,0.92)"; ctx.beginPath(); ctx.ellipse(0, 0, fw * 0.055, fw * 0.04, 0, 0, Math.PI * 2); ctx.fill();        // ojo
+    ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.beginPath(); ctx.arc(-fw * 0.02, -fw * 0.012, fw * 0.012, 0, Math.PI * 2); ctx.fill();   // brillo
+    ctx.strokeStyle = "rgba(55,28,20,0.6)"; ctx.lineWidth = Math.max(1.5, fw * 0.02); ctx.beginPath(); ctx.moveTo(-fw * 0.1, -fw * 0.06); ctx.lineTo(fw * 0.1, -fw * 0.045); ctx.stroke();  // ceja
+    ctx.restore();
+  }
+  // fauces, que se abren con tu boca real
+  if (mouth) drawTitanMaw(mouth);
   ctx.restore();
 }
-function drawTitanMaw(m, fw) {
+// Boca del titán: orientada a las comisuras reales, se abre en vertical, con dientes y lengua
+function drawTitanMaw(m) {
+  const L = m.cl, R = m.cr;
+  const ang = Math.atan2(R.y - L.y, R.x - L.x);
+  const wid = Math.hypot(R.x - L.x, R.y - L.y) * 1.3;
   const open = clamp(m.amt, 0, 1);
-  const w = Math.max(fw * 0.55, m.r * 1.7);
-  const h = w * (0.16 + open * 0.8);
-  ctx.save(); ctx.translate(m.x, m.y);
-  ctx.fillStyle = "#2a0d0d";
-  ctx.beginPath(); ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#e9e2cf";
-  const nT = 7, tw = w / nT, th = Math.min(h * 0.45, tw * 0.95);
+  const gap = Math.max(wid * 0.05, wid * open * 0.55);
+  ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(ang);
+  // cavidad (lente entre arco superior e inferior)
+  ctx.beginPath();
+  ctx.moveTo(-wid / 2, 0); ctx.quadraticCurveTo(0, -gap, wid / 2, 0); ctx.quadraticCurveTo(0, gap, -wid / 2, 0); ctx.closePath();
+  ctx.fillStyle = "#1c0707"; ctx.fill();
+  // lengua
+  if (open > 0.25) { ctx.fillStyle = "#7a2b2b"; ctx.beginPath(); ctx.ellipse(0, gap * 0.4, wid * 0.3, gap * 0.32, 0, 0, Math.PI * 2); ctx.fill(); }
+  // dientes siguiendo los arcos
+  ctx.fillStyle = "#e9e1ca";
+  const nT = 9, step = wid / nT, th = Math.min(gap * 0.55, step * 0.75);
   for (let i = 0; i < nT; i++) {
-    const x = -w / 2 + tw * (i + 0.5);
-    ctx.beginPath(); ctx.moveTo(x - tw * 0.4, -h / 2); ctx.lineTo(x + tw * 0.4, -h / 2); ctx.lineTo(x, -h / 2 + th); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(x - tw * 0.4, h / 2); ctx.lineTo(x + tw * 0.4, h / 2); ctx.lineTo(x, h / 2 - th); ctx.closePath(); ctx.fill();
+    const x = -wid / 2 + step * (i + 0.5), curve = (1 - (2 * x / wid) ** 2) * 0.92;
+    const yT = -gap * curve, yB = gap * curve;
+    ctx.beginPath(); ctx.moveTo(x - step * 0.42, yT); ctx.lineTo(x + step * 0.42, yT); ctx.lineTo(x, yT + th); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x - step * 0.42, yB); ctx.lineTo(x + step * 0.42, yB); ctx.lineTo(x, yB - th); ctx.closePath(); ctx.fill();
   }
+  // labios oscuros
+  ctx.strokeStyle = "rgba(50,20,16,0.7)"; ctx.lineWidth = Math.max(1.5, wid * 0.02);
+  ctx.beginPath(); ctx.moveTo(-wid / 2, 0); ctx.quadraticCurveTo(0, -gap, wid / 2, 0); ctx.quadraticCurveTo(0, gap, -wid / 2, 0); ctx.stroke();
   ctx.restore();
 }
 
@@ -1249,7 +1308,13 @@ function draw(t) {
       drawPerson(per, t);
       ctx.restore();
     } else drawPerson(per, t);
+    // muñón rojo en el borde cortado del trozo que cae
+    if (per.bitten) {
+      let tp = null; for (const pt of per.pts) if (!pt.dead && (!tp || pt.y < tp.y)) tp = pt;
+      if (tp) { ctx.fillStyle = "#6e0d10"; ctx.beginPath(); ctx.ellipse(tp.x, tp.y, per.size * 0.07, per.size * 0.035, 0, 0, Math.PI * 2); ctx.fill(); }
+    }
   }
+  drawPartsTop();   // sangre por encima de todo
 
   // anillo del puntero que se cierra según la pinza (sin esqueleto de la mano ni aro de boca)
   for (const [id, p] of pointers) {
