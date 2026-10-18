@@ -371,7 +371,9 @@ function detectHands(now) {
   if (video.currentTime === lastVideoTime) return;
   lastVideoTime = video.currentTime;
   detectFaceFrame(now);
-  const res = landmarker.detectForVideo(video, now);
+  // La mano va con un timestamp distinto al de la cara: dos tareas del mismo fileset con el mismo
+  // timestamp hacen que MediaPipe lance excepción (igual que en el modo /cara/)
+  const res = landmarker.detectForVideo(video, now + 0.1);
   const seen = new Set();
   (res.landmarks || []).forEach((lms, i) => {
     const hand = res.handednesses?.[i]?.[0]?.categoryName || "h" + i;
