@@ -62,7 +62,7 @@
 <div id="hud" hidden>
   <span id="title">Mano Mágica</span>
   <span class="pill" id="status">Cargando modelo…</span>
-  <span class="pill">En la cesta: <b id="count">0</b></span>
+  <span class="pill" hidden>En la cesta: <b id="count">0</b></span>
   <span class="pill">Comidos: <b id="eaten">0</b></span>
   <button class="btn" id="reset" type="button">Recolocar</button>
   <button class="btn" id="mute" type="button">Sonido: sí</button>
@@ -203,9 +203,8 @@ function layoutStage() {
   shelf.y = H * (portrait() ? 0.42 : 0.47);
 }
 
-// Dónde apoya alguien que está en x con los pies a la altura y
+// Dónde apoya alguien que está en x con los pies a la altura y (sin repisa: siempre el suelo)
 function supportAt(x, y) {
-  if (x > shelf.x - 10 && x < shelf.x + shelf.w + 10 && y <= shelf.y + 6) return shelf.y;
   return floorY;
 }
 
@@ -286,13 +285,10 @@ function spawn() {
   const size = portrait() ? Math.min(H * 0.16, W * 0.34) : Math.min(H * 0.23, 190);
   people = [];
   people.portrait = portrait();
-  const onShelfN = portrait() ? 1 : 2;
+  const m = 16;
+  // todos en el suelo, repartidos a lo ancho
   for (let i = 0; i < n; i++) {
-    const onShelf = i < onShelfN;
-    const k = onShelf ? i : i - onShelfN;
-    const slots = onShelf ? onShelfN : n - onShelfN;
-    const x = onShelf ? shelf.x + shelf.w * (k + 0.5) / slots : 16 + (basket.x - 32) * (k + 0.5) / slots;
-    people.push(makePerson(x, onShelf ? shelf.y : floorY, size));
+    people.push(makePerson(m + (W - 2 * m) * (i + 0.5) / n, floorY, size));
   }
   parts.length = 0;
 }
@@ -447,7 +443,7 @@ function updateEat(dt) {
 function spawnOne() {
   if (!W || !H) return;
   const size = portrait() ? Math.min(H * 0.16, W * 0.34) : Math.min(H * 0.23, 190);
-  people.push(makePerson(rand(16, Math.max(48, basket.x - 32)), floorY, size));
+  people.push(makePerson(rand(16, Math.max(48, W - 16)), floorY, size));
 }
 // Bocado: un crujido de ruido filtrado + un "gulp" que baja de tono
 function chomp() {
@@ -506,9 +502,7 @@ const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 function walkRange(per) {
   const m = per.size * 0.12;
-  if (per.gy === shelf.y) return [shelf.x + m, shelf.x + shelf.w - m];
-  if (per.inBasket) return [basket.x + m, basket.x + basket.w - m];
-  return per.x < basket.x ? [m, basket.x - m] : [basket.x + basket.w + m, W - m];
+  return [m, W - m];
 }
 
 function toRagdoll(per) { per.state = "ragdoll"; per.stateT = 0; per.k = 0; }
@@ -630,21 +624,8 @@ function collideStatic(pt, carried, per) {
     if (v > per.impact) per.impact = v;
     pt.y = floorY - r; pt.px = pt.x - (pt.x - pt.px) * 0.55;
   }
-  // estantería: sólo si llega desde arriba, y no para quien va cogido (así se puede bajar a través de ella)
-  if (!carried && pt.x > shelf.x - 10 && pt.x < shelf.x + shelf.w + 10 && pt.y + r > shelf.y && pt.py + r <= shelf.y + 3) {
-    if (v > per.impact) per.impact = v;
-    pt.y = shelf.y - r; pt.px = pt.x - (pt.x - pt.px) * 0.55;
-  }
   if (pt.x < r) pt.x = r; else if (pt.x > W - r) pt.x = W - r;
   if (pt.y < -H) pt.y = -H;
-  // paredes de la cesta
-  const b = basket;
-  for (const wx of [b.x, b.x + b.w]) {
-    if (pt.y + r > b.y && Math.abs(pt.x - wx) < r + 4) {
-      if (pt.py + r <= b.y + 2) pt.y = b.y - r;
-      else pt.x = pt.px < wx ? wx - r - 4 : wx + r + 4;
-    }
-  }
 }
 
 function step(dt) {
@@ -1110,15 +1091,9 @@ function drawMouth() {
 function draw(t) {
   ctx.clearRect(0, 0, W, H);
   drawEnvironment();
-  drawShelf();
-  drawBasketBack();
   for (const per of people) drawShadow(per);
   drawParts();
-  // quien está colgando, delante de todo; los de la cesta, detrás de su pared delantera
-  const inB = people.filter(p => p.inBasket && !p.held && !p.beingEaten);
-  const rest = people.filter(p => !inB.includes(p)).sort((a, b) => a.held - b.held);
-  for (const per of inB) drawPerson(per, t);
-  drawBasketFront();
+  const rest = people.slice().sort((a, b) => a.held - b.held);
   for (const per of rest) {
     if (per.beingEaten) {
       const k = Math.max(0, 1 - per.eatT / EAT_DUR);
@@ -1167,7 +1142,6 @@ function frame(now) {
     reactions(now);
     eatCheck(now);
     updateEat(dt);
-    countBasket();
     updateParts(dt);
     draw(now);
   } catch (e) {
