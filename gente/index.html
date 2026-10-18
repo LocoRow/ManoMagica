@@ -409,35 +409,78 @@ function detectFaceFrame(now) {
   mouth = { x: (up.x + lo.x) / 2, y: (up.y + lo.y) / 2, r: Math.max(w * 0.6, 24), open, amt: clamp((ratio - 0.1) / 0.5, 0, 1) };
 }
 
-// ---------- Comerse a la gente ----------
-// Sólo se come lo que acabas de sostener o soltar (eatArmed) y que toca la boca abierta
-function eatCheck(now) {
-  if (!mouth || !mouth.open) return;
-  for (const per of people) {
-    if (per.beingEaten) continue;
-    if (now - (per.eatArmed || -1e9) > 700) continue;
-    let hit = false;
-    for (const pt of per.pts) { if (Math.hypot(pt.x - mouth.x, pt.y - mouth.y) < mouth.r + pt.r) { hit = true; break; } }
-    if (hit) startEat(per);
+// ---------- Comerse a la gente (estilo titán) ----------
+// Empieza a "masticar" lo que acabas de sostener/soltar y toca la boca abierta. Con la boca
+// abierta se traga poco a poco (los puntos que entran se marcan `dead` y se recortan al
+// dibujar). Si cierras la boca a medias, lo parte: lo de dentro se lo traga y el resto cae.
+let mouthWasOpen = false;
+function chewUpdate(dt, now) {
+  // empezar a masticar: recién sostenido/soltado y tocando la boca abierta
+  if (mouth && mouth.open) {
+    for (const per of people) {
+      if (per.chewing || per.bitten) continue;
+      if (now - (per.eatArmed || -1e9) > 700) continue;
+      let hit = false;
+      for (const pt of per.pts) { if (!pt.dead && Math.hypot(pt.x - mouth.x, pt.y - mouth.y) < mouth.r + pt.r) { hit = true; break; } }
+      if (hit) { per.chewing = true; per.k = 0; per.state = "ragdoll"; say(per, "scream"); chomp(0.45); }
+    }
   }
-}
-function startEat(per) {
-  per.beingEaten = true; per.eatT = 0;
-  per.eatTarget = { x: mouth.x, y: mouth.y };
-  for (const pt of per.pts) { if (pt.held) { pt.held.held = null; pt.held = null; } }
-  say(per, "scream");
-  chomp();
-  eaten++; if (eatenEl) eatenEl.textContent = eaten;
-}
-function updateEat(dt) {
+  const closing = mouthWasOpen && (!mouth || !mouth.open);   // flanco: la boca se acaba de cerrar
   for (let i = people.length - 1; i >= 0; i--) {
     const per = people[i];
-    if (!per.beingEaten) continue;
-    per.eatT += dt;
-    const c = per.eatTarget, f = Math.min(1, dt * 16);
-    for (const pt of per.pts) { pt.x += (c.x - pt.x) * f; pt.y += (c.y - pt.y) * f; pt.px = pt.x; pt.py = pt.y; }
-    if (per.eatT >= EAT_DUR) { people.splice(i, 1); setTimeout(spawnOne, 500 + Math.random() * 1400); }
+    if (!per.chewing) continue;
+    if (!mouth) { per.chewing = false; continue; }            // se perdió la cara
+    if (mouth.open) {
+      // tragar: atraer los puntos vivos a la boca y marcar los que entran bien dentro
+      const f = Math.min(1, dt * 3.4);
+      for (const pt of per.pts) {
+        if (pt.dead) continue;
+        pt.x += (mouth.x - pt.x) * f; pt.y += (mouth.y - pt.y) * f;
+        if (Math.hypot(pt.x - mouth.x, pt.y - mouth.y) < mouth.r * 0.5) pt.dead = 1;
+      }
+      if (per.pts.every(pt => pt.dead)) { swallowWhole(per); continue; }
+    } else if (closing) {
+      biteInHalf(per);
+    }
   }
+  mouthWasOpen = !!(mouth && mouth.open);
+}
+
+function swallowWhole(per) {
+  for (const pt of per.pts) if (pt.held) { pt.held.held = null; pt.held = null; }
+  removePerson(per);
+  eaten++; if (eatenEl) eatenEl.textContent = eaten;
+  chomp(1);
+}
+
+// Mordisco: lo que esté dentro de la boca se traga (`dead`), el resto cae como trozo suelto.
+// Al marcar puntos `dead`, satisfy() corta sus varillas, así el cuerpo se separa de verdad.
+function biteInHalf(per) {
+  const cut = { x: mouth.x, y: mouth.y, r: mouth.r };
+  let anyIn = false, anyOut = false;
+  for (const pt of per.pts) {
+    if (pt.dead || Math.hypot(pt.x - cut.x, pt.y - cut.y) < cut.r) { pt.dead = 1; anyIn = true; }
+    else anyOut = true;
+  }
+  for (const pt of per.pts) if (pt.held) { pt.held.held = null; pt.held = null; }
+  per.chewing = false;
+  if (anyIn && anyOut) {
+    per.bitten = true; per.cut = cut; per.k = 0; per.state = "ragdoll"; per.dizzy = 2.5;
+    for (const pt of per.pts) if (!pt.dead) { pt.px = pt.x - (Math.random() * 3 - 1.5); pt.py = pt.y - 3; }  // impulso de caída
+    eaten++; if (eatenEl) eatenEl.textContent = eaten;
+    chomp(1); say(per, "ay"); gore(cut.x, cut.y, per.size);
+    setTimeout(() => removePerson(per), 4000);
+  } else if (anyIn) {
+    swallowWhole(per);                 // estaba casi todo dentro
+  } else {
+    per.chewing = false;               // nada dentro: se escapó
+  }
+}
+
+function removePerson(per) {
+  const idx = people.indexOf(per);
+  if (idx >= 0) people.splice(idx, 1);
+  setTimeout(spawnOne, 500 + Math.random() * 1400);
 }
 // Repone un paseante nuevo tras comerte a alguien, para que no se vacíe la escena
 function spawnOne() {
@@ -445,17 +488,24 @@ function spawnOne() {
   const size = portrait() ? Math.min(H * 0.16, W * 0.34) : Math.min(H * 0.23, 190);
   people.push(makePerson(rand(16, Math.max(48, W - 16)), floorY, size));
 }
-// Bocado: un crujido de ruido filtrado + un "gulp" que baja de tono
-function chomp() {
+// Salpicadura roja del mordisco (reutiliza el sistema de partículas con color)
+function gore(x, y, s) {
+  for (let i = 0; i < 16; i++) {
+    const a = rand(Math.PI), sp = rand(0.4, 1.3) * s;
+    parts.push({ x, y, vx: Math.cos(a) * sp * (Math.random() < 0.5 ? -1 : 1), vy: -Math.abs(Math.sin(a)) * sp, life: 0, max: rand(0.5, 1), r: s * rand(0.02, 0.05), col: [172, 22, 26] });
+  }
+}
+// Bocado: un crujido de ruido filtrado + un "gulp" que baja de tono (v = intensidad 0..1)
+function chomp(v = 1) {
   if (!ready()) return;
   const t = AC.currentTime;
   const nz = AC.createBufferSource(); nz.buffer = noiseBuf;
   const f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 900; f.Q.value = 0.8;
-  const g = AC.createGain(); env(g, t, 0.5, 0.004, 0.12);
+  const g = AC.createGain(); env(g, t, 0.22 + v * 0.32, 0.004, 0.12);
   nz.connect(f).connect(g).connect(master); nz.start(t, rand(0.4), 0.14);
   const o = AC.createOscillator(); o.type = "square";
   o.frequency.setValueAtTime(260, t + 0.08); o.frequency.exponentialRampToValueAtTime(70, t + 0.3);
-  const g2 = AC.createGain(); env(g2, t + 0.08, 0.25, 0.01, 0.26);
+  const g2 = AC.createGain(); env(g2, t + 0.08, 0.1 + v * 0.18, 0.01, 0.26);
   o.connect(g2).connect(master); o.start(t + 0.08); o.stop(t + 0.36);
 }
 
@@ -508,7 +558,7 @@ function walkRange(per) {
 function toRagdoll(per) { per.state = "ragdoll"; per.stateT = 0; per.k = 0; }
 
 function brain(per, dt, t) {
-  if (per.beingEaten) return;
+  if (per.chewing || per.bitten) return;
   const P = per.pts, s = per.size;
   per.held = P.some(p => p.held);
   per.stateT += dt;
@@ -632,10 +682,10 @@ function step(dt) {
   SUB_DT = dt;
   const g = GRAVITY * dt * dt;
   for (const per of people) {
-    if (per.beingEaten) continue;
     const posed = per.k > 0;
     const damp = posed ? 0.88 : DAMP;
     per.pts.forEach((pt, i) => {
+      if (pt.dead) { pt.px = pt.x; pt.py = pt.y; return; }   // ya tragado: congelado en la boca
       if (pt.held) {
         pt.px = pt.x; pt.py = pt.y;
         pt.x += (pt.held.x - pt.x) * 0.7; pt.y += (pt.held.y - pt.y) * 0.7;
@@ -649,17 +699,17 @@ function step(dt) {
   }
   for (let it = 0; it < ITER; it++) {
     for (const per of people) {
-      if (per.beingEaten) continue;
       const P = per.pts;
       STICKS.forEach(([a, b], k) => satisfy(P[a], P[b], per.rest[k], false));
       SOFT.forEach(([a, b], k) => satisfy(P[a], P[b], per.soft[k], true));
-      for (const pt of P) if (!pt.held) collideStatic(pt, per.held, per);
+      for (const pt of P) if (!pt.held && !pt.dead) collideStatic(pt, per.held, per);
     }
     if (it % 3 === 0) collidePeople();
   }
 }
 
 function satisfy(a, b, len, minOnly) {
+  if (a.dead || b.dead) return;   // varilla cortada por el mordisco
   const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.001;
   if (minOnly && d >= len) return;
   const wa = a.held ? 0 : 1, wb = b.held ? 0 : 1, w = wa + wb;
@@ -671,9 +721,9 @@ function satisfy(a, b, len, minOnly) {
 
 function collidePeople() {
   for (let i = 0; i < people.length; i++) for (let j = i + 1; j < people.length; j++) {
-    if (people[i].beingEaten || people[j].beingEaten) continue;
     const A = people[i].pts, B = people[j].pts;
     for (const a of A) for (const b of B) {
+      if (a.dead || b.dead) continue;
       const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, min = (a.r + b.r) * 1.5;
       if (d2 >= min * min || d2 === 0) continue;
       const d = Math.sqrt(d2), push = (min - d) / d * 0.5;
@@ -687,7 +737,7 @@ function collidePeople() {
 // Golpes: sonido según la fuerza, polvo y, si es muy fuerte, se queda un rato en el suelo
 function reactions(now) {
   for (const per of people) {
-    if (per.beingEaten) continue;
+    if (per.chewing) continue;
     const v = per.impact; per.impact = 0;
     if (v < 600 || now - per.lastThud < 160) continue;
     per.lastThud = now;
@@ -729,9 +779,10 @@ function updateParts(dt) {
 }
 function drawParts() {
   for (const q of parts) {
-    const a = 0.28 * (1 - q.life / q.max);
+    const [cr, cg, cb] = q.col || [205, 195, 180];
+    const a = (q.col ? 0.6 : 0.28) * (1 - q.life / q.max);
     const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, q.r);
-    g.addColorStop(0, `rgba(205,195,180,${a})`); g.addColorStop(1, "rgba(205,195,180,0)");
+    g.addColorStop(0, `rgba(${cr},${cg},${cb},${a})`); g.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2); ctx.fill();
   }
 }
@@ -1095,12 +1146,15 @@ function draw(t) {
   drawParts();
   const rest = people.slice().sort((a, b) => a.held - b.held);
   for (const per of rest) {
-    if (per.beingEaten) {
-      const k = Math.max(0, 1 - per.eatT / EAT_DUR);
-      ctx.save(); ctx.globalAlpha = k;
-      ctx.translate(per.eatTarget.x, per.eatTarget.y); ctx.scale(k, k); ctx.translate(-per.eatTarget.x, -per.eatTarget.y);
+    // mientras se traga (boca abierta) o tras el mordisco, se recorta el disco de la boca:
+    // lo que queda dentro no se dibuja, así parece que se lo come
+    const clip = per.bitten ? per.cut : (per.chewing && mouth && mouth.open ? mouth : null);
+    if (clip) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.arc(clip.x, clip.y, clip.r, 0, Math.PI * 2);
+      ctx.clip("evenodd");
       drawPerson(per, t);
-      ctx.restore(); ctx.globalAlpha = 1;
+      ctx.restore();
     } else drawPerson(per, t);
   }
 
@@ -1133,8 +1187,7 @@ function frame(now) {
     for (const per of people) { if (per.pts.some(p => p.held)) per.eatArmed = now; brain(per, dt, now / 1000); }
     for (let i = 0; i < SUBSTEPS; i++) step(dt / SUBSTEPS);
     reactions(now);
-    eatCheck(now);
-    updateEat(dt);
+    chewUpdate(dt, now);
     updateParts(dt);
     draw(now);
   } catch (e) {
