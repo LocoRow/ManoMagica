@@ -22,7 +22,7 @@
   html, body { height: 100%; margin: 0; background: #0b0a10; color: var(--ink); overflow: hidden; font-family: var(--display); }
   video, canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
   canvas { touch-action: none; }
-  video { object-fit: cover; transform: scaleX(-1); filter: saturate(.8) brightness(.78) contrast(1.05); }
+  video { object-fit: cover; transform: scaleX(-1); filter: saturate(.55) sepia(.22) brightness(.72) contrast(1.08); }
   #hud {
     position: fixed; top: 16px; left: 16px; right: 16px;
     display: flex; gap: 10px; align-items: center; flex-wrap: wrap; pointer-events: none;
@@ -239,6 +239,11 @@ const HAIRS = ["#17110d", "#2e1f15", "#4a2f1c", "#6e4527", "#a07040", "#c9a466",
 const TOPS = ["#f1f0ec", "#1e2638", "#8f2f2f", "#3d5e49", "#c4a476", "#66758e", "#d9c3a5", "#262626", "#6c3c55", "#2f5d7c"];
 const BOTTOMS = ["#3b5a85", "#2a3a56", "#1c1c1e", "#54443a", "#b39f7e", "#474c54", "#6b7f99"];
 const SHOES = ["#ecebe7", "#151515", "#5e3a22", "#3a3a3a", "#a83a32"];
+// Look de soldado (inspirado, sin emblema): chaqueta tostada, pantalón crema, botas marrón, capa corta lisa
+const JACKETS = ["#a98b5c", "#9c7d4e", "#b49867", "#8f7444", "#b79b6e"];
+const TROUSERS = ["#d8cbab", "#cdbf9c", "#c6b891", "#d2c6a4"];
+const BOOT = "#4a3019";
+const CAPES = ["#5b6350", "#55604f", "#6a6256", "#4f5a52"];
 
 function shade(hex, amt) {
   const n = parseInt(hex.slice(1), 16);
@@ -252,11 +257,12 @@ function makeLook() {
   return {
     skin, skinLight: shade(skin, 0.18), skinDark: shade(skin, -0.22),
     hair: pick(HAIRS),
-    hairStyle: fem ? pick(["long", "long", "bun", "curly", "bob"]) : pick(["short", "short", "curly", "buzz", "bald"]),
-    clothes: fem ? pick(["tee", "long", "dress", "hoodie"]) : pick(["tee", "long", "hoodie"]),
-    top: pick(TOPS), bottom: pick(BOTTOMS), shoes: pick(SHOES),
+    hairStyle: fem ? pick(["long", "bun", "bob"]) : pick(["short", "short", "buzz"]),
+    clothes: "long",                       // chaqueta de manga larga (look de soldado)
+    top: pick(JACKETS), bottom: pick(TROUSERS), shoes: BOOT,
     eye: pick(["#3b2416", "#2a1a10", "#4a6b8a", "#4f6b3c"]),
-    beard: !fem && Math.random() < 0.3,
+    beard: !fem && Math.random() < 0.2,
+    cape: pick(CAPES),
     fem,
   };
 }
@@ -304,6 +310,9 @@ function pointer(id) {
 let landmarker = null, lastVideoTime = -1;
 let faceLm = null;           // detección de cara (para comer con la boca)
 let mouth = null;            // boca en pantalla: { x, y, r, open, amt }
+let face = null;             // cara en pantalla para el overlay de titán: { ov, fw, eL, eR, top, chin, cx, cy }
+// silueta de la cara (subconjunto ordenado del FaceMesh de MediaPipe)
+const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
 let eaten = 0;
 const eatenEl = document.getElementById("eaten");
 const EAT_DUR = 0.4;         // duración de la animación de tragar
@@ -400,13 +409,22 @@ function detectFaceFrame(now) {
   if (!faceLm) return;
   let res; try { res = faceLm.detectForVideo(video, now); } catch { return; }
   const lms = res.faceLandmarks && res.faceLandmarks[0];
-  if (!lms) { mouth = null; return; }
+  if (!lms) { mouth = null; face = null; return; }
   const up = toScreen(lms[13]), lo = toScreen(lms[14]);
   const cl = toScreen(lms[61]), cr = toScreen(lms[291]);
   const w = Math.hypot(cl.x - cr.x, cl.y - cr.y) || 1;
   const ratio = Math.hypot(up.x - lo.x, up.y - lo.y) / w;   // 0 cerrada, ~0.6+ muy abierta
   const open = (mouth && mouth.open) ? ratio > 0.22 : ratio > 0.4;   // histéresis
   mouth = { x: (up.x + lo.x) / 2, y: (up.y + lo.y) / 2, r: Math.max(w * 0.6, 24), open, amt: clamp((ratio - 0.1) / 0.5, 0, 1) };
+  // datos para el overlay de titán
+  const oL = toScreen(lms[234]), oR = toScreen(lms[454]), top = toScreen(lms[10]), chin = toScreen(lms[152]);
+  face = {
+    ov: FACE_OVAL.map(i => toScreen(lms[i])),
+    fw: Math.hypot(oL.x - oR.x, oL.y - oR.y) || 1,
+    eL: mid(toScreen(lms[33]), toScreen(lms[133])),
+    eR: mid(toScreen(lms[362]), toScreen(lms[263])),
+    top, chin, cx: (oL.x + oR.x) / 2, cy: (top.y + chin.y) / 2,
+  };
 }
 
 // ---------- Comerse a la gente (estilo titán) ----------
@@ -885,9 +903,17 @@ function drawTorso(per) {
   g.addColorStop(0, "rgba(255,255,255,0.14)"); g.addColorStop(0.45, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(0,0,0,0.3)");
   ctx.beginPath(); ctx.moveTo(sLo.x, sLo.y); ctx.lineTo(sRo.x, sRo.y); ctx.lineTo(hRo.x, hRo.y); ctx.lineTo(hLo.x, hLo.y); ctx.closePath();
   ctx.fillStyle = g; ctx.fill();
-  // cinturón / costuras
+  // arneses del equipo de maniobras (genérico, inspirado, sin emblema) + cinturón
   if (L.clothes !== "dress") {
-    ctx.strokeStyle = "rgba(0,0,0,0.25)"; ctx.lineWidth = Math.max(1, s * 0.008);
+    const hipC = mid(hemL, hemR);
+    ctx.strokeStyle = "rgba(48,34,20,0.85)"; ctx.lineWidth = Math.max(1.5, s * 0.016); ctx.lineCap = "round";
+    // dos tirantes verticales
+    const a1 = lerp(sL, sR, 0.33), b1 = lerp(hemL, hemR, 0.4), a2 = lerp(sL, sR, 0.67), b2 = lerp(hemL, hemR, 0.6);
+    ctx.beginPath(); ctx.moveTo(a1.x, a1.y); ctx.lineTo(b1.x, b1.y); ctx.moveTo(a2.x, a2.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
+    // correa en V hacia el centro de la cintura
+    ctx.beginPath(); ctx.moveTo(sL.x, sL.y); ctx.lineTo(hipC.x, hipC.y); ctx.lineTo(sR.x, sR.y); ctx.stroke();
+    // cinturón ancho
+    ctx.strokeStyle = "rgba(40,28,16,0.9)"; ctx.lineWidth = Math.max(2, s * 0.03);
     ctx.beginPath(); ctx.moveTo(hemL.x, hemL.y); ctx.lineTo(hemR.x, hemR.y); ctx.stroke();
   }
   // escote / capucha
@@ -1031,10 +1057,29 @@ function drawShadow(per) {
   ctx.restore();
 }
 
+function drawCape(per) {
+  const P = per.pts, J = n => P[IDX[n]], s = per.size, L = per.look;
+  if (!L.cape) return;
+  const nk = J("neck"), sL = J("shL"), sR = J("shR"), hL = J("hiL"), hR = J("hiR");
+  const bx = hR.x - hL.x, by = hR.y - hL.y;
+  const topL = lerp(nk, sL, 1.1), topR = lerp(nk, sR, 1.1);
+  const botL = { x: hL.x - bx * 0.4, y: Math.max(hL.y, hR.y) + s * 0.14 };
+  const botR = { x: hR.x + bx * 0.4, y: Math.max(hL.y, hR.y) + s * 0.14 };
+  ctx.fillStyle = L.cape;
+  ctx.beginPath();
+  ctx.moveTo(topL.x, topL.y); ctx.lineTo(topR.x, topR.y);
+  ctx.quadraticCurveTo((topR.x + botR.x) / 2 + s * 0.04, (topR.y + botR.y) / 2, botR.x, botR.y);
+  ctx.quadraticCurveTo((botL.x + botR.x) / 2, Math.max(botL.y, botR.y) + s * 0.03, botL.x, botL.y);
+  ctx.quadraticCurveTo((topL.x + botL.x) / 2 - s * 0.04, (topL.y + botL.y) / 2, topL.x, topL.y);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "rgba(0,0,0,0.22)"; ctx.fill();
+}
+
 function drawPerson(per, t) {
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   // el lado de atrás según hacia dónde mira, un poco más oscuro
   const back = per.dir > 0 ? "L" : "R", front = back === "L" ? "R" : "L";
+  drawCape(per);
   drawArm(per, back, 0.12);
   drawLeg(per, back, 0.1);
   drawLeg(per, front, 0);
@@ -1139,9 +1184,57 @@ function drawMouth() {
   ctx.restore();
 }
 
+// Overlay de titán sobre quien sale por la cámara (criatura grotesca propia, no un personaje concreto)
+function drawTitanFace() {
+  if (!face) return;
+  const { ov, fw, eL, eR } = face;
+  ctx.save();
+  // silueta de la cara
+  ctx.beginPath();
+  ctx.moveTo(ov[0].x, ov[0].y);
+  for (let i = 1; i < ov.length; i++) ctx.lineTo(ov[i].x, ov[i].y);
+  ctx.closePath();
+  // piel titánica semitransparente (deja ver algo de la cara real)
+  ctx.save(); ctx.clip();
+  const g = ctx.createLinearGradient(0, face.top.y, 0, face.chin.y);
+  g.addColorStop(0, "rgba(216,178,152,0.72)"); g.addColorStop(1, "rgba(150,94,68,0.74)");
+  ctx.fillStyle = g; ctx.fillRect(face.cx - fw, face.top.y - fw, fw * 2, fw * 2.6);
+  // vetas de músculo
+  ctx.strokeStyle = "rgba(92,50,36,0.33)"; ctx.lineWidth = Math.max(1, fw * 0.02);
+  for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(face.cx + k * fw * 0.22, face.top.y + fw * 0.2); ctx.lineTo(face.cx + k * fw * 0.3, face.chin.y); ctx.stroke(); }
+  ctx.restore();
+  // borde
+  ctx.lineWidth = Math.max(1.5, fw * 0.03); ctx.strokeStyle = "rgba(70,40,28,0.5)"; ctx.stroke();
+  // ojos pequeños y hundidos + ojeras
+  ctx.fillStyle = "rgba(18,9,7,0.88)";
+  for (const e of [eL, eR]) { ctx.beginPath(); ctx.ellipse(e.x, e.y, fw * 0.05, fw * 0.035, 0, 0, Math.PI * 2); ctx.fill(); }
+  ctx.strokeStyle = "rgba(60,30,25,0.5)"; ctx.lineWidth = Math.max(1, fw * 0.015);
+  for (const e of [eL, eR]) { ctx.beginPath(); ctx.arc(e.x, e.y + fw * 0.03, fw * 0.08, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke(); }
+  // fauces enormes con dientes, que se abren con tu boca real
+  if (mouth) drawTitanMaw(mouth, fw);
+  ctx.restore();
+}
+function drawTitanMaw(m, fw) {
+  const open = clamp(m.amt, 0, 1);
+  const w = Math.max(fw * 0.55, m.r * 1.7);
+  const h = w * (0.16 + open * 0.8);
+  ctx.save(); ctx.translate(m.x, m.y);
+  ctx.fillStyle = "#2a0d0d";
+  ctx.beginPath(); ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#e9e2cf";
+  const nT = 7, tw = w / nT, th = Math.min(h * 0.45, tw * 0.95);
+  for (let i = 0; i < nT; i++) {
+    const x = -w / 2 + tw * (i + 0.5);
+    ctx.beginPath(); ctx.moveTo(x - tw * 0.4, -h / 2); ctx.lineTo(x + tw * 0.4, -h / 2); ctx.lineTo(x, -h / 2 + th); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x - tw * 0.4, h / 2); ctx.lineTo(x + tw * 0.4, h / 2); ctx.lineTo(x, h / 2 - th); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
 function draw(t) {
   ctx.clearRect(0, 0, W, H);
   drawEnvironment();
+  drawTitanFace();
   for (const per of people) drawShadow(per);
   drawParts();
   const rest = people.slice().sort((a, b) => a.held - b.held);
