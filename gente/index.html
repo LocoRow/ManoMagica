@@ -1103,16 +1103,9 @@ function draw(t) {
       ctx.restore(); ctx.globalAlpha = 1;
     } else drawPerson(per, t);
   }
-  drawMouth();
 
-  // manos detectadas (discretas) y anillo que se cierra según la pinza
+  // anillo del puntero que se cierra según la pinza (sin esqueleto de la mano ni aro de boca)
   for (const [id, p] of pointers) {
-    if (p.landmarks) {
-      ctx.strokeStyle = "rgba(124,245,200,.35)"; ctx.lineWidth = 2; ctx.lineCap = "round";
-      ctx.beginPath();
-      for (const [a, c] of BONES) { ctx.moveTo(p.landmarks[a].x, p.landmarks[a].y); ctx.lineTo(p.landmarks[c].x, p.landmarks[c].y); }
-      ctx.stroke();
-    }
     if (!p.init || (id === "mouse" && !p.pinch && !p.held)) continue;
     ctx.lineWidth = 3;
     ctx.strokeStyle = "rgba(244,241,255,.35)";
