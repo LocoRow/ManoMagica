@@ -324,7 +324,7 @@ const EAT_DUR = 0.4;         // duración de la animación de tragar
 // La cámara se pinta en un canvas WebGL debajo de la escena. Dentro del óvalo de la cara se deforma
 // (sonrisa de oreja a oreja, ojos pequeños y hundidos, nariz, mandíbula y cráneo más grandes) y se
 // retoca la piel (más grano, cuencas, arco de la ceja, frente arrugada, surcos, mejillas hundidas).
-// Las fauces con dientes se dibujan encima en 2D, alineadas con esa sonrisa estirada.
+// No se pinta boca ni dientes encima: se ven los de verdad, estirados por la sonrisa.
 const tgl = document.getElementById("tgl");
 const TITAN = { grin: 1.0, eyes: -0.38, nose: 0.3, jaw: 0.22, head: 0.12 };
 const T_EXT = 1.25, T_FM = 256;
@@ -513,16 +513,9 @@ function renderTitan() {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-// ---------- Fauces del titán (2D, encima de la cara) ----------
+// ---------- Forma de la boca abierta (no se dibuja: sirve para tragar y para cortar) ----------
 // Media altura de la abertura a la distancia x del centro (0 en las comisuras)
 function mawHalf(m, x) { const u = 1 - (2 * x / m.wid) ** 2; return u <= 0 ? 0 : m.gap * Math.pow(u, 0.65); }
-function mawLocalPath(m, pad = 0) {
-  const N = 28;
-  ctx.beginPath();
-  for (let i = 0; i <= N; i++) { const x = -m.wid / 2 + m.wid * i / N, h = mawHalf(m, x); i ? ctx.lineTo(x, -h - (h > 0 ? pad : 0)) : ctx.moveTo(x, 0); }
-  for (let i = N; i >= 0; i--) { const x = -m.wid / 2 + m.wid * i / N, h = mawHalf(m, x); ctx.lineTo(x, h + (h > 0 ? pad : 0)); }
-  ctx.closePath();
-}
 // La misma abertura en coordenadas de pantalla, añadida al trazado actual (para recortar)
 function addMawWorld(m) {
   const N = 28, c = Math.cos(m.ang), s = Math.sin(m.ang);
@@ -537,53 +530,6 @@ function insideMaw(m, p, pad = 0) {
   if (Math.abs(x) > m.wid / 2) return false;
   return Math.abs(y) <= mawHalf(m, x) + pad;
 }
-function drawMaw(m, teethOnly = false) {
-  const w = m.wid, th = w * 0.075;   // alto de un diente
-  ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.ang);
-  if (!teethOnly) {
-    // labios desgarrados: borde oscuro y blando que funde las fauces con la piel
-    ctx.save(); ctx.shadowColor = "rgba(40,6,6,0.85)"; ctx.shadowBlur = w * 0.06;
-    mawLocalPath(m, th * 0.42); ctx.fillStyle = "#3a0d0d"; ctx.fill(); ctx.restore();
-    // encías
-    mawLocalPath(m, th * 0.32);
-    const gg = ctx.createLinearGradient(0, -m.gap - th, 0, m.gap + th);
-    gg.addColorStop(0, "#9a3a3c"); gg.addColorStop(0.5, "#5a1418"); gg.addColorStop(1, "#8e3336");
-    ctx.fillStyle = gg; ctx.fill();
-    // garganta y lengua
-    mawLocalPath(m);
-    const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, w * 0.5);
-    cg.addColorStop(0, "#050101"); cg.addColorStop(1, "#2a0707");
-    ctx.fillStyle = cg; ctx.fill();
-    if (m.gap > th * 0.9) { ctx.fillStyle = "#6e2226"; ctx.beginPath(); ctx.ellipse(0, m.gap * 0.55, w * 0.2, m.gap * 0.35, 0, 0, Math.PI * 2); ctx.fill(); }
-  }
-  // dientes: fila de abajo y luego la de arriba, que al cerrar se encajan
-  const N = 18, lw = Math.max(0.8, w * 0.003);
-  for (const row of [1, -1]) {
-    for (let i = 0; i < N; i++) {
-      const x0 = -w / 2 + w * i / N, x1 = -w / 2 + w * (i + 1) / N, xc = (x0 + x1) / 2, tw = x1 - x0;
-      const edge = Math.abs(2 * xc / w);
-      const base = mawHalf(m, xc) + th * 0.28;
-      const len = th * (1.15 - 0.55 * edge) * (row < 0 ? 1.08 : 0.95);
-      const pad = tw * 0.06, tip = tw * 0.18;
-      const yb = row * base, yt = row * (base - len);
-      ctx.beginPath();
-      ctx.moveTo(x0 + pad, yb); ctx.lineTo(x1 - pad, yb);
-      ctx.lineTo(x1 - pad - tip * 0.5, yt + row * len * 0.12);
-      ctx.quadraticCurveTo(xc, yt - row * len * 0.04, x0 + pad + tip * 0.5, yt + row * len * 0.12);
-      ctx.closePath();
-      const tgd = ctx.createLinearGradient(0, yb, 0, yt);
-      tgd.addColorStop(0, "#a48a5d"); tgd.addColorStop(0.35, "#ddd0b0"); tgd.addColorStop(1, "#f5eedf");
-      ctx.fillStyle = tgd; ctx.fill();
-      // curvatura: cada diente más oscuro en los lados, y los de las comisuras en sombra
-      const sg = ctx.createLinearGradient(x0, 0, x1, 0);
-      sg.addColorStop(0, `rgba(30,18,8,${0.22 + 0.3 * edge})`); sg.addColorStop(0.45, "rgba(30,18,8,0)"); sg.addColorStop(1, `rgba(30,18,8,${0.3 + 0.3 * edge})`);
-      ctx.fillStyle = sg; ctx.fill();
-      ctx.strokeStyle = "rgba(70,45,25,0.45)"; ctx.lineWidth = lw; ctx.stroke();
-    }
-  }
-  ctx.restore();
-}
-
 // Grupos de puntos vivos unidos por varillas (para saber qué trozo cae tras un mordisco)
 function liveComponents(per) {
   const P = per.pts, n = P.length, adj = P.map(() => []);
@@ -1621,8 +1567,7 @@ function drawTitanMaw(m) {
 function draw(t) {
   ctx.clearRect(0, 0, W, H);
   drawEnvironment();
-  if (titanGL && titanGL.shown) { if (tg) drawMaw(tg.maw); }
-  else drawTitanFace();                       // sin WebGL: la máscara pintada de antes
+  if (!(titanGL && titanGL.shown)) drawTitanFace();   // sin WebGL: la máscara pintada de antes
   for (const per of people) drawShadow(per);
   drawParts();
   const rest = people.slice().sort((a, b) => a.held - b.held);
@@ -1642,8 +1587,6 @@ function draw(t) {
     drawCut = false;
     if (per.bitten) drawStumps(per);
   }
-  // mientras te comes a alguien, los dientes quedan por delante de su cuerpo
-  if (tg && titanGL && titanGL.shown && people.some(p => p.chewing)) drawMaw(tg.maw, true);
   drawPartsTop();   // sangre por encima de todo
 
   // anillo del puntero que se cierra según la pinza (sin esqueleto de la mano ni aro de boca)
