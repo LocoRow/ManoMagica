@@ -31,7 +31,7 @@
   .eyebrow { font: 400 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
   h1 { margin: 0; font: 800 clamp(44px, 9vw, 96px)/.9 var(--display); letter-spacing: -.035em; text-wrap: balance; }
   header p { margin: 0 auto; max-width: 34rem; color: var(--dim); font-size: 17px; line-height: 1.5; }
-  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 18px; }
+  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 36rem)); justify-content: center; gap: 18px; }
   .mode {
     display: grid; grid-template-rows: auto 1fr; text-decoration: none; color: inherit;
     background: var(--card); border: 1px solid var(--line); border-radius: 22px; overflow: hidden;
@@ -40,7 +40,6 @@
   .mode:hover { transform: translateY(-4px); background: rgba(255,255,255,.07); }
   .mode:focus-visible { outline: 3px solid var(--c); outline-offset: 4px; }
   .mode.gente { --c: var(--mint); }
-  .mode.cara { --c: var(--pink); }
   .mode:hover { border-color: var(--c); }
   .art { aspect-ratio: 16 / 9; width: 100%; max-width: 100%; height: auto; display: block; object-fit: cover; background: #120f18; }
   .body { padding: 22px 24px 24px; display: grid; gap: 10px; align-content: start; }
@@ -58,7 +57,7 @@
   <header>
     <span class="eyebrow">Reconocimiento por cámara</span>
     <h1>mano-loca</h1>
-    <p>Tu cámara ve tus manos y tu cara, y con ellas mueves lo que hay en pantalla. Elige un modo.</p>
+    <p>Tu cámara ve tus manos y tu cara: con la mano coges a la gente y con la boca te la comes.</p>
   </header>
 
   <div class="modes">
@@ -69,16 +68,6 @@
         <p>Hay gente paseando por el escenario. Si acercas la mano, huyen. Cógelos de la cabeza, una mano o un pie y el resto del cuerpo cuelga. Te conviertes en titán: abre la boca y cómetelos, o muérdelos por la mitad.</p>
         <div class="meta"><span class="tag">Física de cuerpos</span><span class="tag">Sonido</span><span class="tag">Ratón sin cámara</span></div>
         <span class="go">Jugar →</span>
-      </div>
-    </a>
-
-    <a class="mode cara" href="cara/">
-      <img class="art" src="img/cara.webp?v=1" width="960" height="540" alt="Cara de titán moldeada: mejillas ensanchadas y nariz enorme">
-      <div class="body">
-        <h2>Moldea tu cara</h2>
-        <p>Haz la pinza sobre tu cara y tira: se estira como plastilina y la deformación te sigue aunque te muevas. Con efectos de narizón, ojos saltones o cabezón, y foto para guardarla.</p>
-        <div class="meta"><span class="tag">Cara + manos</span><span class="tag">Modo gelatina</span><span class="tag">Funciona con una foto</span></div>
-        <span class="go">Probar →</span>
       </div>
     </a>
   </div>
