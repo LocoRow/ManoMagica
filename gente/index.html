@@ -23,6 +23,7 @@
   video, canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
   canvas { touch-action: none; }
   video { object-fit: cover; transform: scaleX(-1); filter: saturate(.55) sepia(.22) brightness(.72) contrast(1.08); }
+  #tgl { pointer-events: none; filter: saturate(.55) sepia(.22) brightness(.72) contrast(1.08); }
   #hud {
     position: fixed; top: 16px; left: 16px; right: 16px;
     display: flex; gap: 10px; align-items: center; flex-wrap: wrap; pointer-events: none;
@@ -57,10 +58,11 @@
 </head>
 <body>
 <video id="cam" autoplay playsinline muted></video>
+<canvas id="tgl"></canvas>
 <canvas id="stage"></canvas>
 
 <div id="hud" hidden>
-  <span id="title">Mano Mágica</span>
+  <span id="title">mano-loca</span>
   <span class="pill" id="status">Cargando modelo…</span>
   <span class="pill" hidden>En la cesta: <b id="count">0</b></span>
   <span class="pill">Comidos: <b id="eaten">0</b></span>
@@ -104,6 +106,7 @@ function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = innerWidth; H = innerHeight;
   cv.width = W * DPR; cv.height = H * DPR;
+  const gd = Math.min(DPR, 1.5); tgl.width = Math.max(1, Math.round(W * gd)); tgl.height = Math.max(1, Math.round(H * gd));
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   layoutStage();
   // Si se crearon sin tamaño (pestaña oculta al cargar) o el móvil gira, se vuelven a colocar
@@ -317,6 +320,280 @@ let eaten = 0;
 const eatenEl = document.getElementById("eaten");
 const EAT_DUR = 0.4;         // duración de la animación de tragar
 
+// ---------- Cara de titán: tu propia cara transformada en WebGL ----------
+// La cámara se pinta en un canvas WebGL debajo de la escena. Dentro del óvalo de la cara se deforma
+// (sonrisa de oreja a oreja, ojos pequeños y hundidos, nariz, mandíbula y cráneo más grandes) y se
+// retoca la piel (más grano, cuencas, arco de la ceja, frente arrugada, surcos, mejillas hundidas).
+// Las fauces con dientes se dibujan encima en 2D, alineadas con esa sonrisa estirada.
+const tgl = document.getElementById("tgl");
+const TITAN = { grin: 1.0, eyes: -0.38, nose: 0.3, jaw: 0.22, head: 0.12 };
+const T_EXT = 1.25, T_FM = 256;
+let titanGL = null, tg = null, tsm = null, faceLms = null;
+let srcEl = video;   // de dónde sale la imagen: la cámara (o una foto, en las pruebas locales)
+const srcW = () => srcEl.videoWidth || srcEl.naturalWidth || 1280;
+const srcH = () => srcEl.videoHeight || srcEl.naturalHeight || 720;
+const srcReady = () => srcEl === video ? video.readyState >= 2 : srcEl.complete && srcEl.naturalWidth > 0;
+
+const TITAN_FS = `precision highp float;
+uniform sampler2D uTex; uniform sampler2D uMask;
+uniform vec4 uMap; uniform vec2 uRes; uniform float uHasFace;
+uniform vec2 uC; uniform vec2 uUx; uniform vec2 uUy; uniform float uS;
+uniform int uND; uniform vec4 uDrag[4]; uniform float uDragR[4];
+uniform int uNB; uniform vec4 uBulge[8];
+uniform vec2 uEyeL; uniform vec2 uEyeR; uniform vec2 uNose; uniform vec2 uML; uniform vec2 uMR; uniform float uUp;
+varying vec2 vPos;
+vec3 pick(vec2 p) { vec2 uv = (p - uMap.xy) / uMap.zw; uv.x = 1.0 - uv.x; return texture2D(uTex, clamp(uv, 0.0, 1.0)).rgb; }
+vec2 toLocal(vec2 p) { vec2 q = p - uC; return vec2(dot(q, uUx), dot(q, uUy)) / uS; }
+float segD(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h); }
+float g2(float d, float w) { return exp(-(d * d) / (w * w)); }
+void main(){
+  vec3 live = pick(vPos);
+  if (uHasFace < 0.5) { gl_FragColor = vec4(live, 1.0); return; }
+  // de qué punto de la imagen viene cada píxel (deformación inversa)
+  vec2 p = vPos;
+  for (int i = 3; i >= 0; i--) { if (i >= uND) continue; vec4 d = uDrag[i]; float r = uDragR[i]; vec2 q = p - d.xy; p -= d.zw * exp(-dot(q, q) / (r * r)); }
+  for (int i = 0; i < 8; i++) { if (i >= uNB) break; vec4 b = uBulge[i]; vec2 q = p - b.xy; float w = exp(-dot(q, q) / (b.z * b.z)); p = b.xy + q * (1.0 - b.w * w); }
+  vec2 l = toLocal(p);
+  vec2 tc = l / (2.0 * ${T_EXT.toFixed(3)}) + 0.5;
+  float inC = step(0.0, tc.x) * step(0.0, tc.y) * step(tc.x, 1.0) * step(tc.y, 1.0);
+  float m = texture2D(uMask, clamp(tc, 0.0, 1.0)).r * inC;
+  if (m < 0.003) { gl_FragColor = vec4(live, 1.0); return; }
+  vec3 c = pick(p);
+  // grano: realce del detalle de la piel
+  vec3 bl = (pick(p + vec2(1.6, 0.0)) + pick(p - vec2(1.6, 0.0)) + pick(p + vec2(0.0, 1.6)) + pick(p - vec2(0.0, 1.6))) * 0.25;
+  c += (c - bl) * 1.5;
+  // piel: menos saturada, más carne, más contraste
+  float lum = dot(c, vec3(0.299, 0.587, 0.114));
+  c = mix(vec3(lum), c, 0.72) * vec3(1.07, 0.93, 0.85);
+  c = (c - 0.5) * 1.16 + 0.5;
+  float up = uUp;
+  vec2 em = (uEyeL + uEyeR) * 0.5;
+  float side = sign(uMR.x - uML.x);
+  float sh = 1.0;
+  // cuencas hundidas
+  vec2 d1 = (l - uEyeL) * vec2(1.0, 1.3), d2 = (l - uEyeR) * vec2(1.0, 1.3);
+  sh *= 1.0 - 0.6 * exp(-dot(d1, d1) / 0.0095);
+  sh *= 1.0 - 0.6 * exp(-dot(d2, d2) / 0.0095);
+  // arco de la ceja: sombra debajo y luz encima
+  float band = smoothstep(0.42, 0.12, abs(l.x - em.x));
+  sh *= 1.0 - 0.34 * g2(l.y - (em.y + up * 0.055), 0.028) * band;
+  c += 0.06 * g2(l.y - (em.y + up * 0.115), 0.03) * band;
+  // frente arrugada
+  float fy = (l.y - em.y) * up;
+  float fh = smoothstep(0.14, 0.2, fy) * smoothstep(0.42, 0.3, fy) * smoothstep(0.38, 0.15, abs(l.x - em.x));
+  float wr = pow(0.5 + 0.5 * sin(fy * 115.0 + sin(l.x * 11.0) * 1.3), 8.0);
+  sh *= 1.0 - 0.17 * fh * wr;
+  // surcos de la nariz a las comisuras
+  vec2 wingL = vec2(uNose.x - side * 0.075, uNose.y), wingR = vec2(uNose.x + side * 0.075, uNose.y);
+  vec2 mlo = uML + (uML - uMR) * 0.1, mro = uMR + (uMR - uML) * 0.1;
+  sh *= 1.0 - 0.4 * g2(segD(l, wingL, mlo), 0.016);
+  sh *= 1.0 - 0.4 * g2(segD(l, wingR, mro), 0.016);
+  // mejillas hundidas bajo los pómulos
+  vec2 h1 = (l - vec2(em.x - 0.27, uNose.y)) * vec2(1.0, 0.8), h2 = (l - vec2(em.x + 0.27, uNose.y)) * vec2(1.0, 0.8);
+  sh *= 1.0 - 0.22 * exp(-dot(h1, h1) / 0.006);
+  sh *= 1.0 - 0.22 * exp(-dot(h2, h2) / 0.006);
+  // borde de la cara más oscuro, para que se funda
+  sh *= mix(0.72, 1.0, smoothstep(0.05, 0.7, m));
+  c *= sh;
+  gl_FragColor = vec4(mix(live, clamp(c, 0.0, 1.0), m), 1.0);
+}`;
+
+function initTitanGL() {
+  try {
+    const gl = tgl.getContext("webgl", { antialias: false });
+    if (!gl) return null;
+    const VS = `attribute vec2 a; uniform vec2 uRes; varying vec2 vPos;
+void main(){ vPos = vec2((a.x + 1.0) * 0.5 * uRes.x, (1.0 - a.y) * 0.5 * uRes.y); gl_Position = vec4(a, 0.0, 1.0); }`;
+    const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, TITAN_FS));
+    gl.bindAttribLocation(prog, 0, "a"); gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    const mk = unit => {
+      const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
+      for (const [k, v] of [[gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+      return t;
+    };
+    const tex = mk(0), mtex = mk(1);
+    const locs = {}, U = n => (n in locs ? locs[n] : (locs[n] = gl.getUniformLocation(prog, n)));
+    gl.uniform1i(U("uTex"), 0); gl.uniform1i(U("uMask"), 1);
+    const fm = document.createElement("canvas"); fm.width = fm.height = T_FM;
+    return { gl, U, tex, mtex, fm, fctx: fm.getContext("2d"), shown: false };
+  } catch (e) { console.warn("Sin WebGL para la cara de titán", e); return null; }
+}
+
+const frameOf = (cx, cy, s, ang) => ({ c: { x: cx, y: cy }, ux: { x: Math.cos(ang), y: Math.sin(ang) }, uy: { x: -Math.sin(ang), y: Math.cos(ang) }, s });
+const toLocalF = (f, p) => { const qx = p.x - f.c.x, qy = p.y - f.c.y; return { x: (qx * f.ux.x + qy * f.ux.y) / f.s, y: (qx * f.uy.x + qy * f.uy.y) / f.s }; };
+const toWorldF = (f, l) => ({ x: f.c.x + (f.ux.x * l.x + f.uy.x * l.y) * f.s, y: f.c.y + (f.ux.y * l.x + f.uy.y * l.y) * f.s });
+
+// Geometría de la cara para el titán: marco suavizado (para que no tiemble) y rasgos que siguen
+// moviéndose con los gestos (abrir la boca, etc.)
+function titanFrame() {
+  if (!faceLms || !W) return null;
+  const S = i => toScreen(faceLms[i]);
+  const a = S(234), b = S(454);
+  const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, s = Math.hypot(b.x - a.x, b.y - a.y) || 1, ang = Math.atan2(b.y - a.y, b.x - a.x);
+  const jump = tsm ? Math.hypot(cx - tsm.cx, cy - tsm.cy) / s : 1;
+  const k = tsm ? clamp(0.3 + jump * 3, 0.3, 1) : 1;
+  if (!tsm) tsm = { cx, cy, s, ang };
+  tsm.cx += (cx - tsm.cx) * k; tsm.cy += (cy - tsm.cy) * k; tsm.s += (s - tsm.s) * k;
+  let da = ang - tsm.ang; da = Math.atan2(Math.sin(da), Math.cos(da)); tsm.ang += da * k;
+  const raw = frameOf(cx, cy, s, ang), f = frameOf(tsm.cx, tsm.cy, tsm.s, tsm.ang);
+  const K = i => toWorldF(f, toLocalF(raw, S(i)));
+  const iris = faceLms.length > 473;
+  const eyeL = iris ? K(468) : mid(K(33), K(133)), eyeR = iris ? K(473) : mid(K(362), K(263));
+  const nose = K(1), top = K(10), chin = K(152), mc = mid(K(13), K(14)), brow = K(168);
+  let cl = K(61), cr = K(291); if (cl.x > cr.x) [cl, cr] = [cr, cl];
+  const ov = FACE_OVAL.map(K);
+  const L = p => toLocalF(f, p);
+  const em = mid(L(eyeL), L(eyeR));
+  const up = Math.sign(L(top).y - em.y) || -1;
+  const wid = Math.hypot(cr.x - cl.x, cr.y - cl.y) * (1 + TITAN.grin) * 0.96;
+  const amt = mouth ? mouth.amt : 0;
+  const maw = { x: mc.x, y: mc.y, ang: Math.atan2(cr.y - cl.y, cr.x - cl.x), wid, gap: wid * (0.035 + 0.34 * amt) };
+  return { f, up, eyeL, eyeR, nose, top, chin, mc, cl, cr, brow, ov, L, maw };
+}
+
+const T_DRAG = new Float32Array(16), T_DR = new Float32Array(4), T_BUL = new Float32Array(32);
+function renderTitan() {
+  const T = titanGL;
+  if (!T || !W || !srcReady()) return;
+  const gl = T.gl;
+  if (!T.shown) { T.shown = true; video.style.opacity = "0"; }   // desde aquí la imagen la pinta WebGL
+  gl.viewport(0, 0, tgl.width, tgl.height);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, T.tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, srcEl);
+  const vw = srcW(), vh = srcH(), s = Math.max(W / vw, H / vh);
+  gl.uniform2f(T.U("uRes"), W, H);
+  gl.uniform4f(T.U("uMap"), (W - vw * s) / 2, (H - vh * s) / 2, vw * s, vh * s);
+  gl.uniform1f(T.U("uHasFace"), tg ? 1 : 0);
+  if (tg) {
+    const { f, L } = tg;
+    gl.uniform2f(T.U("uC"), f.c.x, f.c.y); gl.uniform2f(T.U("uUx"), f.ux.x, f.ux.y); gl.uniform2f(T.U("uUy"), f.uy.x, f.uy.y); gl.uniform1f(T.U("uS"), f.s);
+    const l2 = (n, p) => { const q = L(p); gl.uniform2f(T.U(n), q.x, q.y); };
+    l2("uEyeL", tg.eyeL); l2("uEyeR", tg.eyeR); l2("uNose", tg.nose); l2("uML", tg.cl); l2("uMR", tg.cr);
+    gl.uniform1f(T.U("uUp"), tg.up);
+    // sonrisa de oreja a oreja: las comisuras se estiran hacia fuera
+    let nd = 0;
+    for (const c of [tg.cl, tg.cr]) {
+      const dx = (c.x - tg.mc.x) * TITAN.grin, dy = (c.y - tg.mc.y) * TITAN.grin;
+      T_DRAG.set([c.x + dx, c.y + dy, dx, dy], nd * 4); T_DR[nd] = Math.max(f.s * 0.17, Math.hypot(dx, dy) * 1.15); nd++;
+    }
+    let nb = 0;
+    const bul = (p, r, k) => { T_BUL.set([p.x, p.y, f.s * r, k], nb * 4); nb++; };
+    bul(tg.eyeL, 0.1, TITAN.eyes); bul(tg.eyeR, 0.1, TITAN.eyes);
+    bul(tg.nose, 0.13, TITAN.nose);
+    bul(lerp(tg.mc, tg.chin, 0.45), 0.27, TITAN.jaw);
+    bul(tg.brow, 0.75, TITAN.head);
+    gl.uniform1i(T.U("uND"), nd); gl.uniform4fv(T.U("uDrag"), T_DRAG); gl.uniform1fv(T.U("uDragR"), T_DR);
+    gl.uniform1i(T.U("uNB"), nb); gl.uniform4fv(T.U("uBulge"), T_BUL);
+    // máscara de la cara en sus propias coordenadas: el óvalo, con frente y mandíbula ampliadas,
+    // difuminado con una sombra (se dibuja fuera del lienzo y sólo cae dentro la sombra)
+    const c2 = T.fctx, off = T_FM + 200, nl = L(tg.nose);
+    c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, T_FM, T_FM);
+    c2.save(); c2.translate(-off, 0); c2.shadowColor = "#fff"; c2.shadowBlur = T_FM * 0.035; c2.shadowOffsetX = off; c2.fillStyle = "#fff";
+    c2.beginPath();
+    tg.ov.forEach((p, n) => {
+      const q = L(p), kk = (q.y - nl.y) * tg.up > 0 ? 1.14 : 1.05;
+      const x = (q.x * kk / (2 * T_EXT) + 0.5) * T_FM, y = (q.y * kk / (2 * T_EXT) + 0.5) * T_FM;
+      n ? c2.lineTo(x, y) : c2.moveTo(x, y);
+    });
+    c2.closePath(); c2.fill(); c2.restore();
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, T.mtex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, T.fm);
+  }
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ---------- Fauces del titán (2D, encima de la cara) ----------
+// Media altura de la abertura a la distancia x del centro (0 en las comisuras)
+function mawHalf(m, x) { const u = 1 - (2 * x / m.wid) ** 2; return u <= 0 ? 0 : m.gap * Math.pow(u, 0.65); }
+function mawLocalPath(m, pad = 0) {
+  const N = 28;
+  ctx.beginPath();
+  for (let i = 0; i <= N; i++) { const x = -m.wid / 2 + m.wid * i / N, h = mawHalf(m, x); i ? ctx.lineTo(x, -h - (h > 0 ? pad : 0)) : ctx.moveTo(x, 0); }
+  for (let i = N; i >= 0; i--) { const x = -m.wid / 2 + m.wid * i / N, h = mawHalf(m, x); ctx.lineTo(x, h + (h > 0 ? pad : 0)); }
+  ctx.closePath();
+}
+// La misma abertura en coordenadas de pantalla, añadida al trazado actual (para recortar)
+function addMawWorld(m) {
+  const N = 28, c = Math.cos(m.ang), s = Math.sin(m.ang);
+  const P = (x, y) => [m.x + x * c - y * s, m.y + x * s + y * c];
+  for (let i = 0; i <= N; i++) { const x = -m.wid / 2 + m.wid * i / N; const [X, Y] = P(x, -mawHalf(m, x)); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }
+  for (let i = N; i >= 0; i--) { const x = -m.wid / 2 + m.wid * i / N; const [X, Y] = P(x, mawHalf(m, x)); ctx.lineTo(X, Y); }
+  ctx.closePath();
+}
+function insideMaw(m, p, pad = 0) {
+  const dx = p.x - m.x, dy = p.y - m.y, c = Math.cos(-m.ang), s = Math.sin(-m.ang);
+  const x = dx * c - dy * s, y = dx * s + dy * c;
+  if (Math.abs(x) > m.wid / 2) return false;
+  return Math.abs(y) <= mawHalf(m, x) + pad;
+}
+function drawMaw(m, teethOnly = false) {
+  const w = m.wid, th = w * 0.075;   // alto de un diente
+  ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.ang);
+  if (!teethOnly) {
+    // labios desgarrados: borde oscuro y blando que funde las fauces con la piel
+    ctx.save(); ctx.shadowColor = "rgba(40,6,6,0.85)"; ctx.shadowBlur = w * 0.06;
+    mawLocalPath(m, th * 0.42); ctx.fillStyle = "#3a0d0d"; ctx.fill(); ctx.restore();
+    // encías
+    mawLocalPath(m, th * 0.32);
+    const gg = ctx.createLinearGradient(0, -m.gap - th, 0, m.gap + th);
+    gg.addColorStop(0, "#9a3a3c"); gg.addColorStop(0.5, "#5a1418"); gg.addColorStop(1, "#8e3336");
+    ctx.fillStyle = gg; ctx.fill();
+    // garganta y lengua
+    mawLocalPath(m);
+    const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, w * 0.5);
+    cg.addColorStop(0, "#050101"); cg.addColorStop(1, "#2a0707");
+    ctx.fillStyle = cg; ctx.fill();
+    if (m.gap > th * 0.9) { ctx.fillStyle = "#6e2226"; ctx.beginPath(); ctx.ellipse(0, m.gap * 0.55, w * 0.2, m.gap * 0.35, 0, 0, Math.PI * 2); ctx.fill(); }
+  }
+  // dientes: fila de abajo y luego la de arriba, que al cerrar se encajan
+  const N = 18, lw = Math.max(0.8, w * 0.003);
+  for (const row of [1, -1]) {
+    for (let i = 0; i < N; i++) {
+      const x0 = -w / 2 + w * i / N, x1 = -w / 2 + w * (i + 1) / N, xc = (x0 + x1) / 2, tw = x1 - x0;
+      const edge = Math.abs(2 * xc / w);
+      const base = mawHalf(m, xc) + th * 0.28;
+      const len = th * (1.15 - 0.55 * edge) * (row < 0 ? 1.08 : 0.95);
+      const pad = tw * 0.06, tip = tw * 0.18;
+      const yb = row * base, yt = row * (base - len);
+      ctx.beginPath();
+      ctx.moveTo(x0 + pad, yb); ctx.lineTo(x1 - pad, yb);
+      ctx.lineTo(x1 - pad - tip * 0.5, yt + row * len * 0.12);
+      ctx.quadraticCurveTo(xc, yt - row * len * 0.04, x0 + pad + tip * 0.5, yt + row * len * 0.12);
+      ctx.closePath();
+      const tgd = ctx.createLinearGradient(0, yb, 0, yt);
+      tgd.addColorStop(0, "#a48a5d"); tgd.addColorStop(0.35, "#ddd0b0"); tgd.addColorStop(1, "#f5eedf");
+      ctx.fillStyle = tgd; ctx.fill();
+      // curvatura: cada diente más oscuro en los lados, y los de las comisuras en sombra
+      const sg = ctx.createLinearGradient(x0, 0, x1, 0);
+      sg.addColorStop(0, `rgba(30,18,8,${0.22 + 0.3 * edge})`); sg.addColorStop(0.45, "rgba(30,18,8,0)"); sg.addColorStop(1, `rgba(30,18,8,${0.3 + 0.3 * edge})`);
+      ctx.fillStyle = sg; ctx.fill();
+      ctx.strokeStyle = "rgba(70,45,25,0.45)"; ctx.lineWidth = lw; ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// Grupos de puntos vivos unidos por varillas (para saber qué trozo cae tras un mordisco)
+function liveComponents(per) {
+  const P = per.pts, n = P.length, adj = P.map(() => []);
+  STICKS.forEach(([a, b]) => { if (!P[a].dead && !P[b].dead) { adj[a].push(b); adj[b].push(a); } });
+  const seen = new Array(n).fill(false), out = [];
+  for (let i = 0; i < n; i++) {
+    if (P[i].dead || seen[i]) continue;
+    const comp = [], st = [i]; seen[i] = true;
+    while (st.length) { const v = st.pop(); comp.push(v); for (const w of adj[v]) if (!seen[w]) { seen[w] = true; st.push(w); } }
+    out.push(comp);
+  }
+  return out;
+}
+
 async function startCamera() {
   audioInit();
   const err = document.getElementById("err");
@@ -365,7 +642,7 @@ document.getElementById("mute").addEventListener("click", e => {
 
 // Normalizado del vídeo → píxeles de pantalla, con object-fit: cover y espejo
 function toScreen(lm) {
-  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+  const vw = srcW(), vh = srcH();
   const s = Math.max(W / vw, H / vh);
   const ox = (W - vw * s) / 2, oy = (H - vh * s) / 2;
   return { x: (1 - lm.x) * vw * s + ox, y: lm.y * vh * s + oy };
@@ -407,9 +684,10 @@ function detectHands(now) {
 // Localiza la boca en pantalla y mide su apertura (labio sup. 13 / inf. 14, ancho entre comisuras 61-291)
 function detectFaceFrame(now) {
   if (!faceLm) return;
-  let res; try { res = faceLm.detectForVideo(video, now); } catch { return; }
+  let res; try { res = faceLm.detectForVideo(srcEl, now); } catch { return; }
   const lms = res.faceLandmarks && res.faceLandmarks[0];
-  if (!lms) { mouth = null; face = null; return; }
+  if (!lms) { mouth = null; face = null; faceLms = null; tsm = null; return; }
+  faceLms = lms;
   const up = toScreen(lms[13]), lo = toScreen(lms[14]);
   const cl = toScreen(lms[61]), cr = toScreen(lms[291]);
   const w = Math.hypot(cl.x - cr.x, cl.y - cr.y) || 1;
@@ -452,22 +730,21 @@ function chewUpdate(dt, now) {
     if (mouth.open) {
       // tragar: atraer los puntos vivos a la boca y marcar los que entran bien dentro
       const f = Math.min(1, dt * 3.4);
+      if (mouth.maw) per.lastMaw = { ...mouth.maw };   // forma de la boca abierta, para cortar por los dientes
       for (const pt of per.pts) {
         if (pt.dead) continue;
         pt.x += (mouth.x - pt.x) * f; pt.y += (mouth.y - pt.y) * f;
-        if (Math.hypot(pt.x - mouth.x, pt.y - mouth.y) < mouth.r * 0.5) pt.dead = 1;
+        if (mouth.maw ? insideMaw(mouth.maw, pt, -pt.r) : Math.hypot(pt.x - mouth.x, pt.y - mouth.y) < mouth.r * 0.5) pt.dead = 1;
       }
       if (per.pts.every(pt => pt.dead)) { swallowWhole(per); continue; }
     } else if (closing) {
       biteInHalf(per);
     }
   }
-  // el trozo cortado gotea sangre mientras cae
+  // los muñones del trozo cortado gotean sangre mientras cae
   for (const per of people) {
     if (!per.bitten) continue;
-    let tp = null;
-    for (const pt of per.pts) if (!pt.dead && (!tp || pt.y < tp.y)) tp = pt;
-    if (tp && Math.random() < 0.55) bloodDrip(tp.x, tp.y, per.size);
+    for (const pt of per.pts) if (pt.stump && Math.random() < 0.35) bloodDrip(pt.x, pt.y, per.size);
   }
   mouthWasOpen = !!(mouth && mouth.open);
 }
@@ -480,28 +757,64 @@ function swallowWhole(per) {
   chomp(1);
 }
 
-// Mordisco: lo que esté dentro de la boca se traga (`dead`), el resto cae como trozo suelto.
-// Al marcar puntos `dead`, satisfy() corta sus varillas, así el cuerpo se separa de verdad.
+// Mordisco: se corta con la forma de la boca abierta (la línea de los dientes). Lo que queda dentro
+// se lo traga; el trozo que cae es el grupo de partes unidas más grande, y cada articulación tragada
+// que tocaba ese trozo se convierte en un muñón colocado justo donde el hueso cruzaba los dientes.
+// Lo tragado ya no se dibuja (antes se veía estirado desde el trozo hasta la boca).
 function biteInHalf(per) {
-  const cut = { x: mouth.x, y: mouth.y, r: mouth.r };
-  let anyIn = false, anyOut = false;
-  for (const pt of per.pts) {
-    if (pt.dead || Math.hypot(pt.x - cut.x, pt.y - cut.y) < cut.r) { pt.dead = 1; anyIn = true; }
-    else anyOut = true;
-  }
-  for (const pt of per.pts) if (pt.held) { pt.held.held = null; pt.held = null; }
+  const lens = per.lastMaw || (mouth && mouth.maw);
   per.chewing = false;
-  if (anyIn && anyOut) {
-    per.bitten = true; per.cut = cut; per.k = 0; per.state = "ragdoll"; per.dizzy = 2.5;
-    for (const pt of per.pts) if (!pt.dead) { pt.px = pt.x - (Math.random() * 3 - 1.5); pt.py = pt.y - 3; }  // impulso de caída
-    eaten++; if (eatenEl) eatenEl.textContent = eaten;
-    chomp(1); say(per, "ay"); gore(cut.x, cut.y, per.size, true);
-    setTimeout(() => removePerson(per), 4000);
-  } else if (anyIn) {
-    swallowWhole(per);                 // estaba casi todo dentro
-  } else {
-    per.chewing = false;               // nada dentro: se escapó
+  if (!lens) return;
+  const P = per.pts, pad = per.size * 0.02;
+  for (const pt of P) if (pt.dead || insideMaw(lens, pt, pad)) pt.dead = 1;
+  for (const pt of P) if (pt.held) { pt.held.held = null; pt.held = null; }
+  const comps = liveComponents(per).sort((x, y) => y.length - x.length);
+  if (!comps.length) { swallowWhole(per); return; }          // estaba todo dentro
+  if (comps[0].length === P.length) { per.lastMaw = null; return; }   // nada dentro: se escapó
+  for (const c of comps.slice(1)) for (const i of c) P[i].dead = 1;   // trozos sueltos pequeños: también se los traga
+  const keep = new Set(comps[0]);
+  // dónde cruza cada hueso cortado la línea de los dientes
+  const cand = new Map();
+  STICKS.forEach(([ia, ib], k) => {
+    if (keep.has(ia) === keep.has(ib)) return;
+    const li = keep.has(ia) ? ia : ib, di = li === ia ? ib : ia;
+    const A = P[li], D = P[di];
+    let lo = 0, hi = 1;
+    for (let it = 0; it < 14; it++) {
+      const m = (lo + hi) / 2;
+      if (insideMaw(lens, { x: A.x + (D.x - A.x) * m, y: A.y + (D.y - A.y) * m }, pad)) hi = m; else lo = m;
+    }
+    if (!cand.has(di)) cand.set(di, []);
+    cand.get(di).push({ li, k, x: A.x + (D.x - A.x) * lo, y: A.y + (D.y - A.y) * lo });
+  });
+  for (const [di, list] of cand) {
+    const D = P[di];
+    D.x = D.px = list.reduce((t, c) => t + c.x, 0) / list.length;
+    D.y = D.py = list.reduce((t, c) => t + c.y, 0) / list.length;
+    D.dead = 0; D.stump = 1;
   }
+  // las varillas que tocan un muñón se ajustan a la nueva longitud, para que no tiren de él
+  STICKS.forEach(([ia, ib], k) => { if ((P[ia].stump || P[ib].stump) && !P[ia].dead && !P[ib].dead) per.rest[k] = Math.hypot(P[ia].x - P[ib].x, P[ia].y - P[ib].y); });
+  SOFT.forEach(([ia, ib], k) => { if (P[ia].stump || P[ib].stump) per.soft[k] = Math.min(per.soft[k], Math.hypot(P[ia].x - P[ib].x, P[ia].y - P[ib].y)); });
+  per.bitten = true; per.cutAng = lens.ang; per.k = 0; per.state = "ragdoll"; per.dizzy = 2.5;
+  for (const pt of P) if (!pt.dead) { pt.px = pt.x - (Math.random() * 3 - 1.5); pt.py = pt.y - 3; }  // impulso de caída
+  eaten++; if (eatenEl) eatenEl.textContent = eaten;
+  chomp(1); say(per, "ay"); gore(lens.x, lens.y, per.size, true);
+  setTimeout(() => removePerson(per), 4000);
+}
+
+// Muñón: carne roja con el borde oscuro y el hueso, orientado como la línea de los dientes
+function drawStumps(per) {
+  const s = per.size, torso = new Set([IDX.shL, IDX.shR, IDX.hiL, IDX.hiR, IDX.neck]);
+  per.pts.forEach((pt, i) => {
+    if (!pt.stump) return;
+    const r = s * (torso.has(i) ? 0.05 : 0.03);
+    ctx.save(); ctx.translate(pt.x, pt.y); ctx.rotate(per.cutAng || 0);
+    ctx.fillStyle = "#4a0608"; ctx.beginPath(); ctx.ellipse(0, 0, r * 1.1, r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#9a2026"; ctx.beginPath(); ctx.ellipse(0, -r * 0.05, r * 0.85, r * 0.38, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#e8dcc6"; ctx.beginPath(); ctx.ellipse(0, -r * 0.05, r * 0.22, r * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  });
 }
 
 function removePerson(per) {
@@ -837,7 +1150,10 @@ function capsule(a, b, ra, rb) {
   ctx.arc(b.x, b.y, rb, ang - Math.PI / 2, ang + Math.PI / 2);
   ctx.closePath();
 }
+let drawCut = false;   // se está dibujando a alguien mordido: se omite lo tragado
+const gone = p => drawCut && p.dead;
 function seg(a, b, ra, rb, color, dark = 0) {
+  if (gone(a) || gone(b)) return;
   capsule(a, b, ra, rb);
   ctx.fillStyle = color; ctx.fill();
   const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
@@ -849,7 +1165,7 @@ function seg(a, b, ra, rb, color, dark = 0) {
   g.addColorStop(1, `rgba(0,0,0,${0.34 + dark})`);
   ctx.fillStyle = g; ctx.fill();
 }
-const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, dead: a.dead || b.dead });
 
 function moodOf(per) {
   if (per.held) return "scream";
@@ -871,6 +1187,7 @@ function drawArm(per, side, dark) {
   if (longSleeve) seg(sh, el, s * 0.03, s * 0.026, L.top, dark);
   else if (L.clothes !== "dress") seg(sh, lerp(sh, el, 0.5), s * 0.031, s * 0.028, L.top, dark);
   // mano
+  if (gone(ha) || gone(el)) return;
   const ang = Math.atan2(ha.y - el.y, ha.x - el.x);
   ctx.save(); ctx.translate(ha.x, ha.y); ctx.rotate(ang);
   ctx.fillStyle = L.skin; ctx.beginPath(); ctx.ellipse(s * 0.018, 0, s * 0.028, s * 0.018, 0, 0, Math.PI * 2); ctx.fill();
@@ -885,12 +1202,13 @@ function drawLeg(per, side, dark) {
   seg(hi, kn, s * 0.047, s * 0.034, legColor, dark);
   seg(kn, ft, s * 0.033, s * 0.022, legColor, dark);
   // correa en el muslo (look soldado)
-  if (L.clothes === "long") {
+  if (L.clothes === "long" && !gone(hi) && !gone(kn)) {
     const m = lerp(hi, kn, 0.5), aT = Math.atan2(kn.y - hi.y, kn.x - hi.x) + Math.PI / 2;
     ctx.strokeStyle = "rgba(48,34,20,0.85)"; ctx.lineWidth = Math.max(1.2, s * 0.013);
     ctx.beginPath(); ctx.moveTo(m.x - Math.cos(aT) * s * 0.05, m.y - Math.sin(aT) * s * 0.05); ctx.lineTo(m.x + Math.cos(aT) * s * 0.05, m.y + Math.sin(aT) * s * 0.05); ctx.stroke();
   }
   // bota alta hasta media pantorrilla
+  if (gone(ft) || gone(kn)) return;
   const bootTop = lerp(ft, kn, 0.45);
   seg(bootTop, ft, s * 0.03, s * 0.022, L.shoes, dark);
   // zapato orientado según la espinilla y hacia donde mira
@@ -904,6 +1222,7 @@ function drawLeg(per, side, dark) {
 function drawTorso(per) {
   const P = per.pts, J = n => P[IDX[n]], s = per.size, L = per.look;
   const sL = J("shL"), sR = J("shR"), hL = J("hiL"), hR = J("hiR");
+  if (gone(sL) || gone(sR) || gone(hL) || gone(hR)) return;
   const ax = sR.x - sL.x, ay = sR.y - sL.y, bx = hR.x - hL.x, by = hR.y - hL.y;
   const sLo = { x: sL.x - ax * 0.1, y: sL.y - ay * 0.1 }, sRo = { x: sR.x + ax * 0.1, y: sR.y + ay * 0.1 };
   const hLo = { x: hL.x - bx * 0.45, y: hL.y - by * 0.45 }, hRo = { x: hR.x + bx * 0.45, y: hR.y + by * 0.45 };
@@ -950,6 +1269,7 @@ function drawTorso(per) {
   }
   // escote / capucha
   const nk = J("neck");
+  if (gone(nk) || nk.stump) return;
   if (L.clothes === "hoodie") {
     ctx.fillStyle = shade(L.top, -0.25);
     ctx.beginPath(); ctx.ellipse(nk.x, nk.y + s * 0.012, s * 0.05, s * 0.022, Math.atan2(ay, ax), 0, Math.PI * 2); ctx.fill();
@@ -965,6 +1285,7 @@ function drawTorso(per) {
 function drawHead(per, t) {
   const P = per.pts, J = n => P[IDX[n]], s = per.size, L = per.look, mood = moodOf(per);
   const hd = J("head"), nk = J("neck");
+  if (gone(hd) || gone(nk)) return;
   seg(nk, lerp(nk, hd, 0.7), s * 0.021, s * 0.02, L.skin, 0.05);
   const ang = Math.atan2(hd.y - nk.y, hd.x - nk.x) + Math.PI / 2;
   const rx = s * 0.05, ry = s * 0.062;
@@ -1078,7 +1399,9 @@ function drawHead(per, t) {
 }
 
 function drawShadow(per) {
-  const P = per.pts, s = per.size, h = mid(P[IDX.hiL], P[IDX.hiR]);
+  const P = per.pts.filter(p => !p.dead), s = per.size;
+  if (!P.length) return;
+  const h = { x: P.reduce((t, p) => t + p.x, 0) / P.length };
   let low = -Infinity; for (const p of P) low = Math.max(low, p.y + p.r);
   const sup = supportAt(h.x, low - 2), gap = Math.max(0, sup - low);
   const a = 0.5 * clamp(1 - gap / (s * 1.4), 0.12, 1), w = s * (0.17 + gap / (s * 6));
@@ -1091,7 +1414,7 @@ function drawShadow(per) {
 
 function drawCape(per) {
   const P = per.pts, J = n => P[IDX[n]], s = per.size, L = per.look;
-  if (!L.cape) return;
+  if (!L.cape || per.bitten) return;
   const nk = J("neck"), sL = J("shL"), sR = J("shR"), hL = J("hiL"), hR = J("hiR");
   const bx = hR.x - hL.x, by = hR.y - hL.y;
   const topL = lerp(nk, sL, 1.1), topR = lerp(nk, sR, 1.1);
@@ -1293,27 +1616,29 @@ function drawTitanMaw(m) {
 function draw(t) {
   ctx.clearRect(0, 0, W, H);
   drawEnvironment();
-  drawTitanFace();
+  if (titanGL && titanGL.shown) { if (tg) drawMaw(tg.maw); }
+  else drawTitanFace();                       // sin WebGL: la máscara pintada de antes
   for (const per of people) drawShadow(per);
   drawParts();
   const rest = people.slice().sort((a, b) => a.held - b.held);
   for (const per of rest) {
     // mientras se traga (boca abierta) o tras el mordisco, se recorta el disco de la boca:
     // lo que queda dentro no se dibuja, así parece que se lo come
-    const clip = per.bitten ? per.cut : (per.chewing && mouth && mouth.open ? mouth : null);
+    const clip = per.chewing && mouth && mouth.open ? mouth : null;
+    drawCut = !!per.bitten;
     if (clip) {
       ctx.save();
-      ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.arc(clip.x, clip.y, clip.r, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.rect(0, 0, W, H);
+      if (clip.maw) addMawWorld(clip.maw); else ctx.arc(clip.x, clip.y, clip.r, 0, Math.PI * 2);
       ctx.clip("evenodd");
       drawPerson(per, t);
       ctx.restore();
     } else drawPerson(per, t);
-    // muñón rojo en el borde cortado del trozo que cae
-    if (per.bitten) {
-      let tp = null; for (const pt of per.pts) if (!pt.dead && (!tp || pt.y < tp.y)) tp = pt;
-      if (tp) { ctx.fillStyle = "#6e0d10"; ctx.beginPath(); ctx.ellipse(tp.x, tp.y, per.size * 0.07, per.size * 0.035, 0, 0, Math.PI * 2); ctx.fill(); }
-    }
+    drawCut = false;
+    if (per.bitten) drawStumps(per);
   }
+  // mientras te comes a alguien, los dientes quedan por delante de su cuerpo
+  if (tg && titanGL && titanGL.shown && people.some(p => p.chewing)) drawMaw(tg.maw, true);
   drawPartsTop();   // sangre por encima de todo
 
   // anillo del puntero que se cierra según la pinza (sin esqueleto de la mano ni aro de boca)
@@ -1335,12 +1660,16 @@ function roundRect(x, y, w, h, r) {
 
 // ---------- Bucle ----------
 let last = performance.now();
-function frame(now) {
+function frame(now) { tick(now); requestAnimationFrame(frame); }
+function tick(now) {
   const dt = Math.min(0.033, (now - last) / 1000) || 0.016;
   last = now;
   // un fallo en un fotograma no debe congelar la escena entera
   try {
     detectHands(now);
+    tg = titanFrame();
+    if (mouth && tg) { mouth.x = tg.maw.x; mouth.y = tg.maw.y; mouth.r = Math.max(tg.maw.wid * 0.3, 24); mouth.maw = tg.maw; }
+    renderTitan();
     updatePointers();
     for (const per of people) { if (per.pts.some(p => p.held)) per.eatArmed = now; brain(per, dt, now / 1000); }
     for (let i = 0; i < SUBSTEPS; i++) step(dt / SUBSTEPS);
@@ -1349,14 +1678,27 @@ function frame(now) {
     updateParts(dt);
     draw(now);
   } catch (e) {
-    if (!frame.failed) { frame.failed = true; console.error(e); window.__manoError = String(e.stack || e); }
+    if (!tick.failed) { tick.failed = true; console.error(e); window.__manoError = String(e.stack || e); }
   }
-  requestAnimationFrame(frame);
 }
 
+titanGL = initTitanGL();
 resize();
+// Pruebas en local: usar una foto como si fuera la cámara (el panel del navegador no tiene cámara)
+async function usePhoto(url) {
+  const img = new Image(); img.crossOrigin = "anonymous";
+  await new Promise((ok, ko) => { img.onload = ok; img.onerror = ko; img.src = url; });
+  srcEl = img;
+  if (!faceLm) {
+    const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    faceLm = await FaceLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", delegate: "GPU" }, runningMode: "VIDEO", numFaces: 1 });
+  }
+  document.getElementById("intro").hidden = true; document.getElementById("hud").hidden = false;
+  detectFaceFrame(performance.now());
+  return !!faceLms;
+}
 // acceso para pruebas, sólo en local
-if (location.hostname === "localhost") window.__mano = { get people() { return people; }, get mouth() { return mouth; }, get eaten() { return eaten; }, IDX, startEat };
+if (location.hostname === "localhost") window.__mano = { get people() { return people; }, get mouth() { return mouth; }, get eaten() { return eaten; }, IDX, usePhoto, tick: () => tick(performance.now()), get tg() { return tg; }, setMouth: m => { mouth = m; } };
 addEventListener("keydown", e => { if (e.key === "r" || e.key === "R") spawn(); });
 requestAnimationFrame(frame);
 </script>

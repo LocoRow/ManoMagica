@@ -1,4 +1,4 @@
-# Mano Mágica
+# mano-loca
 
 Juegos con reconocimiento por cámara (MediaPipe, en el navegador: el vídeo no sale del dispositivo).
 
