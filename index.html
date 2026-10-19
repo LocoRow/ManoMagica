@@ -42,7 +42,7 @@
   .mode.gente { --c: var(--mint); }
   .mode.cara { --c: var(--pink); }
   .mode:hover { border-color: var(--c); }
-  .art { aspect-ratio: 16 / 9; max-width: 100%; display: block; background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.25)); }
+  .art { aspect-ratio: 16 / 9; width: 100%; max-width: 100%; height: auto; display: block; object-fit: cover; background: #120f18; }
   .body { padding: 22px 24px 24px; display: grid; gap: 10px; align-content: start; }
   .body h2 { margin: 0; font: 800 30px/1 var(--display); letter-spacing: -.02em; }
   .body p { margin: 0; color: var(--dim); line-height: 1.5; }
@@ -63,65 +63,17 @@
 
   <div class="modes">
     <a class="mode gente" href="gente/">
-      <svg class="art" viewBox="0 0 320 180" role="img" aria-label="Una mano sujeta a una persona por la cabeza; otras pasean por el suelo">
-        <defs><radialGradient id="g1" cx="50%" cy="40%" r="60%"><stop offset="0" stop-color="#7cf5c8" stop-opacity=".18"/><stop offset="1" stop-color="#7cf5c8" stop-opacity="0"/></radialGradient></defs>
-        <rect width="320" height="180" fill="url(#g1)"/>
-        <rect x="0" y="150" width="320" height="30" fill="#000" opacity=".35"/>
-        <line x1="0" y1="150" x2="320" y2="150" stroke="#fff" stroke-opacity=".15"/>
-        <rect x="18" y="86" width="110" height="5" rx="2" fill="#a6773f"/>
-        <rect x="236" y="128" width="66" height="22" rx="3" fill="#b0834b"/>
-        <g stroke-linecap="round" fill="none">
-          <!-- persona colgando -->
-          <circle cx="176" cy="44" r="6" fill="#e8bd9c" stroke="none"/>
-          <path d="M176 50 L178 74" stroke="#8f2f2f" stroke-width="9"/>
-          <path d="M176 54 L168 66 L166 78 M178 54 L186 66 L190 76" stroke="#e8bd9c" stroke-width="3.2"/>
-          <path d="M177 74 L174 92 L172 108 M179 74 L184 92 L188 106" stroke="#2a3a56" stroke-width="4.2"/>
-          <!-- personas en el suelo y la balda -->
-          <g stroke-width="3.6">
-            <path d="M60 124 L60 138 M60 138 L56 150 M60 138 L64 150" stroke="#3b5a85"/>
-            <path d="M60 110 L60 126" stroke="#3d5e49" stroke-width="7"/>
-            <path d="M120 124 L120 138 M120 138 L115 150 M120 138 L125 150" stroke="#1c1c1e"/>
-            <path d="M120 110 L120 126" stroke="#f1f0ec" stroke-width="7"/>
-            <path d="M74 62 L74 74 M74 74 L71 86 M74 74 L77 86" stroke="#54443a"/>
-            <path d="M74 50 L74 63" stroke="#66758e" stroke-width="7"/>
-          </g>
-          <circle cx="60" cy="104" r="5.5" fill="#c08560" stroke="none"/>
-          <circle cx="120" cy="104" r="5.5" fill="#f3d5c0" stroke="none"/>
-          <circle cx="74" cy="44" r="5.5" fill="#9c6440" stroke="none"/>
-        </g>
-        <!-- mano en pinza -->
-        <g fill="none" stroke="#7cf5c8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity=".9">
-          <path d="M214 14 L196 30 L182 38"/><path d="M226 20 L204 36 L184 40"/><path d="M232 30 L212 40"/><path d="M234 40 L216 46"/>
-          <path d="M226 62 L236 40 L232 22 L214 14"/>
-        </g>
-        <circle cx="181" cy="39" r="9" fill="none" stroke="#ffcf4a" stroke-width="2.4"/>
-      </svg>
+      <img class="art" src="img/gente.webp?v=1" width="960" height="540" alt="Cara de titán con las fauces abiertas y soldados alrededor; uno cuelga de un pie junto a la boca">
       <div class="body">
         <h2>Coge a la gente</h2>
-        <p>Hay gente paseando por el escenario. Si acercas la mano, huyen. Cógelos de la cabeza, una mano o un pie y el resto del cuerpo cuelga. Mételos en la cesta y lo celebran.</p>
+        <p>Hay gente paseando por el escenario. Si acercas la mano, huyen. Cógelos de la cabeza, una mano o un pie y el resto del cuerpo cuelga. Te conviertes en titán: abre la boca y cómetelos, o muérdelos por la mitad.</p>
         <div class="meta"><span class="tag">Física de cuerpos</span><span class="tag">Sonido</span><span class="tag">Ratón sin cámara</span></div>
         <span class="go">Jugar →</span>
       </div>
     </a>
 
     <a class="mode cara" href="cara/">
-      <svg class="art" viewBox="0 0 320 180" role="img" aria-label="Una cara estirada hacia un lado por una mano en pinza">
-        <defs><radialGradient id="g2" cx="50%" cy="45%" r="60%"><stop offset="0" stop-color="#ff9ec4" stop-opacity=".2"/><stop offset="1" stop-color="#ff9ec4" stop-opacity="0"/></radialGradient></defs>
-        <rect width="320" height="180" fill="url(#g2)"/>
-        <!-- cara deformada: la mejilla derecha estirada -->
-        <path d="M128 52 C128 24 192 24 192 52 C200 70 236 84 258 92 C236 104 196 112 186 136 C178 160 142 160 134 136 C124 112 122 80 128 52 Z" fill="#d6a07a"/>
-        <path d="M126 58 C126 22 194 22 194 58 C182 40 140 40 126 58 Z" fill="#2e1f15"/>
-        <ellipse cx="146" cy="78" rx="7" ry="4.5" fill="#f4efe9"/><circle cx="146" cy="78" r="3" fill="#2a1a10"/>
-        <ellipse cx="176" cy="78" rx="9" ry="6" fill="#f4efe9"/><circle cx="177" cy="78" r="3.6" fill="#2a1a10"/>
-        <path d="M160 86 Q166 102 156 104" fill="none" stroke="#9c6440" stroke-width="2"/>
-        <path d="M144 120 Q170 132 200 112" fill="none" stroke="#7c3b35" stroke-width="3" stroke-linecap="round"/>
-        <!-- mano en pinza tirando -->
-        <g fill="none" stroke="#ff9ec4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity=".9">
-          <path d="M300 70 L282 82 L264 90"/><path d="M306 84 L286 92 L266 94"/><path d="M308 96 L290 100"/><path d="M304 108 L290 108"/>
-          <path d="M300 128 L312 100 L306 76 L300 70"/>
-        </g>
-        <circle cx="262" cy="92" r="9" fill="none" stroke="#ffcf4a" stroke-width="2.4"/>
-      </svg>
+      <img class="art" src="img/cara.webp?v=1" width="960" height="540" alt="Cara de titán moldeada: mejillas ensanchadas y nariz enorme">
       <div class="body">
         <h2>Moldea tu cara</h2>
         <p>Haz la pinza sobre tu cara y tira: se estira como plastilina y la deformación te sigue aunque te muevas. Con efectos de narizón, ojos saltones o cabezón, y foto para guardarla.</p>
