@@ -328,13 +328,17 @@ const EAT_DUR = 0.4;         // duración de la animación de tragar
 const tgl = document.getElementById("tgl");
 const TITAN = { grin: 1.0, eyes: -0.38, nose: 0.3, jaw: 0.22, head: 0.12 };
 const T_EXT = 1.25, T_FM = 256;
-let titanGL = null, tg = null, tsm = null, faceLms = null;
+let titanGL = null, tg = null, tsm = null, faceLms = null, titanErr = "";
 let srcEl = video;   // de dónde sale la imagen: la cámara (o una foto, en las pruebas locales)
 const srcW = () => srcEl.videoWidth || srcEl.naturalWidth || 1280;
 const srcH = () => srcEl.videoHeight || srcEl.naturalHeight || 720;
 const srcReady = () => srcEl === video ? video.readyState >= 2 : srcEl.complete && srcEl.naturalWidth > 0;
 
-const TITAN_FS = `precision highp float;
+const TITAN_FS = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
 uniform sampler2D uTex; uniform sampler2D uMask;
 uniform vec4 uMap; uniform vec2 uRes; uniform float uHasFace;
 uniform vec2 uC; uniform vec2 uUx; uniform vec2 uUy; uniform float uS;
@@ -423,7 +427,7 @@ void main(){ vPos = vec2((a.x + 1.0) * 0.5 * uRes.x, (1.0 - a.y) * 0.5 * uRes.y)
     gl.uniform1i(U("uTex"), 0); gl.uniform1i(U("uMask"), 1);
     const fm = document.createElement("canvas"); fm.width = fm.height = T_FM;
     return { gl, U, tex, mtex, fm, fctx: fm.getContext("2d"), shown: false };
-  } catch (e) { console.warn("Sin WebGL para la cara de titán", e); return null; }
+  } catch (e) { console.warn("Sin WebGL para la cara de titán", e); titanErr = "sin WebGL"; return null; }
 }
 
 const frameOf = (cx, cy, s, ang) => ({ c: { x: cx, y: cy }, ux: { x: Math.cos(ang), y: Math.sin(ang) }, uy: { x: -Math.sin(ang), y: Math.cos(ang) }, s });
@@ -678,7 +682,8 @@ function detectHands(now) {
     if (id.startsWith("hand-") && !seen.has(id) && now - p.seen > 250) { release(p); pointers.delete(id); }
   }
   const n = [...pointers.keys()].filter(k => k.startsWith("hand-")).length;
-  statusEl.innerHTML = n ? `<b>${n}</b> mano${n > 1 ? "s" : ""} detectada${n > 1 ? "s" : ""}` : "Enseña la mano a la cámara";
+  statusEl.innerHTML = (n ? `<b>${n}</b> mano${n > 1 ? "s" : ""} detectada${n > 1 ? "s" : ""}` : "Enseña la mano a la cámara")
+    + (titanErr ? ` · titán básico (${titanErr})` : "");
 }
 
 // Localiza la boca en pantalla y mide su apertura (labio sup. 13 / inf. 14, ancho entre comisuras 61-291)
@@ -1669,7 +1674,9 @@ function tick(now) {
     detectHands(now);
     tg = titanFrame();
     if (mouth && tg) { mouth.x = tg.maw.x; mouth.y = tg.maw.y; mouth.r = Math.max(tg.maw.wid * 0.3, 24); mouth.maw = tg.maw; }
-    renderTitan();
+    // si la cara de titán en WebGL falla, se vuelve a la máscara pintada y se avisa en el estado
+    try { renderTitan(); }
+    catch (e) { console.error(e); titanErr = String(e.message || e).slice(0, 60); titanGL = null; video.style.opacity = ""; }
     updatePointers();
     for (const per of people) { if (per.pts.some(p => p.held)) per.eatArmed = now; brain(per, dt, now / 1000); }
     for (let i = 0; i < SUBSTEPS; i++) step(dt / SUBSTEPS);
